@@ -484,7 +484,7 @@ void mdp_dma2_update(struct msm_fb_data_type *mfd)
 	unsigned long flag;
 
 	down(&mfd->dma->mutex);
-	if ((mfd) && (!mfd->dma->busy) && (mfd->panel_power_on)) {
+	if ((mfd) && (!mfd->dma->busy) && (!mdp_fb_is_power_off(mfd))) {
 		down(&mfd->sem);
 		mfd->ibuf_flushed = TRUE;
 		mdp_dma2_update_lcd(mfd);
@@ -539,7 +539,6 @@ void mdp_dma_vsync_ctrl(int enable)
 		mdp_enable_irq(MDP_VSYNC_TERM);
 		spin_unlock_irqrestore(&mdp_spin_lock, flag);
 	}
-
 	if (vsync_cntrl.vsync_irq_enabled &&
 		atomic_read(&vsync_cntrl.suspend) == 0)
 		atomic_set(&vsync_cntrl.vsync_resume, 1);

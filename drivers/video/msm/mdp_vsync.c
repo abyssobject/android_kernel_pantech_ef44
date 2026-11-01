@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, 2012 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2009, 2012-2013 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -152,7 +152,7 @@ static void mdp_set_vsync(unsigned long data)
 	if ((pdata) && (pdata->set_vsync_notifier == NULL))
 		return;
 
-	if ((mfd->panel_info.lcd.vsync_enable) && (mfd->panel_power_on)
+	if ((mfd->panel_info.lcd.vsync_enable) && !mdp_fb_is_power_off(mfd)
 	    && (!mfd->vsync_handler_pending)) {
 		mfd->vsync_handler_pending = TRUE;
 		if (!queue_work(mdp_vsync_wq, &mfd->vsync_resync_worker)) {
@@ -162,7 +162,7 @@ static void mdp_set_vsync(unsigned long data)
 	} else {
 		MSM_FB_DEBUG
 		    ("mdp_set_vsync failed!  EN:%d  PWR:%d  PENDING:%d\n",
-		     mfd->panel_info.lcd.vsync_enable, mfd->panel_power_on,
+		     mfd->panel_info.lcd.vsync_enable, !mdp_fb_is_power_off(mfd),
 		     mfd->vsync_handler_pending);
 	}
 
@@ -189,7 +189,7 @@ static void mdp_vsync_handler(void *data)
 
 	if (mfd->use_mdp_vsync) {
 #ifdef MDP_HW_VSYNC
-		if (mfd->panel_power_on) {
+		if (!mdp_fb_is_power_off(mfd)) {
 			MDP_OUTP(MDP_BASE + MDP_SYNC_STATUS_0, vsync_load_cnt);
 
 #ifdef CONFIG_FB_MSM_MDP40
@@ -224,7 +224,11 @@ static void mdp_set_sync_cfg_0(struct msm_fb_data_type *mfd, int vsync_cnt)
 {
 	unsigned long cfg;
 
-	cfg = mfd->total_lcd_lines - 1;
+	if (mfd->panel_info.lcd.total_lines)
+		cfg = mfd->panel_info.lcd.total_lines;
+	else
+		cfg = mfd->total_lcd_lines - 1;
+
 	cfg <<= MDP_SYNCFG_HGT_LOC;
 	if (mfd->panel_info.lcd.hw_vsync_mode)
 		cfg |= MDP_SYNCFG_VSYNC_EXT_EN;
@@ -238,7 +242,11 @@ static void mdp_set_sync_cfg_1(struct msm_fb_data_type *mfd, int vsync_cnt)
 {
 	unsigned long cfg;
 
-	cfg = mfd->total_lcd_lines - 1;
+	if (mfd->panel_info.lcd.total_lines)
+		cfg = mfd->panel_info.lcd.total_lines;
+	else
+		cfg = mfd->total_lcd_lines - 1;
+
 	cfg <<= MDP_SYNCFG_HGT_LOC;
 	if (mfd->panel_info.lcd.hw_vsync_mode)
 		cfg |= MDP_SYNCFG_VSYNC_EXT_EN;
@@ -431,7 +439,7 @@ void mdp_vsync_resync_workqueue_handler(struct work_struct *work)
 	mfd = container_of(work, struct msm_fb_data_type, vsync_resync_worker);
 
 	if (mfd) {
-		if (mfd->panel_power_on) {
+		if (!mdp_fb_is_power_off(mfd)) {
 			pdata =
 			    (struct msm_fb_panel_data *)mfd->pdev->dev.
 			    platform_data;

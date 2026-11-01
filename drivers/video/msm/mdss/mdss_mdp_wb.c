@@ -14,6 +14,7 @@
 #define pr_fmt(fmt)	"%s: " fmt, __func__
 
 #include <linux/errno.h>
+#include <linux/msm_ion.h>
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/module.h>
@@ -76,9 +77,9 @@ struct mdss_mdp_data *mdss_mdp_wb_debug_buffer(struct msm_fb_data_type *mfd)
 
 	if (ihdl == NULL) {
 		ihdl = ion_alloc(mfd->iclient, img_size, SZ_4K,
-				 ION_HEAP(ION_SF_HEAP_ID));
+				 ION_HEAP(ION_SF_HEAP_ID), 0);
 		if (!IS_ERR_OR_NULL(ihdl)) {
-			videomemory = ion_map_kernel(mfd->iclient, ihdl, 0);
+			videomemory = ion_map_kernel(mfd->iclient, ihdl);
 			ion_phys(mfd->iclient, ihdl, &mdss_wb_mem, &img_size);
 		} else {
 			pr_err("unable to alloc fbmem from ion (%p)\n", ihdl);

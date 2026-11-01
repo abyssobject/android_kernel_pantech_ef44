@@ -84,6 +84,7 @@
 
 #include <linux/smsc3503.h>
 #include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <mach/ion.h>
 #include <mach/mdm2.h>
 #include <mach/mdm-peripheral.h>
@@ -541,72 +542,74 @@ static struct ion_co_heap_pdata fw_co_msm8960_ion_pdata = {
  * to each other.
  * Don't swap the order unless you know what you are doing!
  */
+static struct ion_platform_heap msm8960_heaps[] = {
+	{
+		.id	= ION_SYSTEM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_SYSTEM,
+		.name	= ION_VMALLOC_HEAP_NAME,
+	},
+#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
+	{
+		.id	= ION_CP_MM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MM_HEAP_NAME,
+		.size	= MSM_ION_MM_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &cp_mm_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_MM_FIRMWARE_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_MM_FIRMWARE_HEAP_NAME,
+		.size	= MSM_ION_MM_FW_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &fw_co_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_CP_MFC_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MFC_HEAP_NAME,
+		.size	= MSM_ION_MFC_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &cp_mfc_msm8960_ion_pdata,
+	},
+#ifndef CONFIG_MSM_IOMMU
+	{
+		.id	= ION_SF_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_SF_HEAP_NAME,
+		.size	= MSM_ION_SF_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+#endif
+	{
+		.id	= ION_IOMMU_HEAP_ID,
+		.type	= ION_HEAP_TYPE_IOMMU,
+		.name	= ION_IOMMU_HEAP_NAME,
+	},
+	{
+		.id	= ION_QSECOM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_QSECOM_HEAP_NAME,
+		.size	= MSM_ION_QSECOM_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_AUDIO_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_AUDIO_HEAP_NAME,
+		.size	= MSM_ION_AUDIO_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+#endif
+};
+
 static struct ion_platform_data msm8960_ion_pdata = {
 	.nr = MSM_ION_HEAP_NUM,
-	.heaps = {
-		{
-			.id	= ION_SYSTEM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_SYSTEM,
-			.name	= ION_VMALLOC_HEAP_NAME,
-		},
-#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		{
-			.id	= ION_CP_MM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MM_HEAP_NAME,
-			.size	= MSM_ION_MM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &cp_mm_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_MM_FIRMWARE_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_MM_FIRMWARE_HEAP_NAME,
-			.size	= MSM_ION_MM_FW_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &fw_co_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_CP_MFC_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MFC_HEAP_NAME,
-			.size	= MSM_ION_MFC_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &cp_mfc_msm8960_ion_pdata,
-		},
-#ifndef CONFIG_MSM_IOMMU
-		{
-			.id	= ION_SF_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_SF_HEAP_NAME,
-			.size	= MSM_ION_SF_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-#endif
-		{
-			.id	= ION_IOMMU_HEAP_ID,
-			.type	= ION_HEAP_TYPE_IOMMU,
-			.name	= ION_IOMMU_HEAP_NAME,
-		},
-		{
-			.id	= ION_QSECOM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_QSECOM_HEAP_NAME,
-			.size	= MSM_ION_QSECOM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_AUDIO_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_AUDIO_HEAP_NAME,
-			.size	= MSM_ION_AUDIO_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-#endif
-	}
+	.heaps = msm8960_heaps,
 };
 
 static struct platform_device msm8960_ion_dev = {
