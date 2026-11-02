@@ -3300,7 +3300,9 @@ static int bluetooth_power(int on)
 		gpio_set_value(GPIO_BT_RESET_N, 0);
 		mdelay(200); 
 		gpio_set_value(GPIO_BT_RESET_N, 1);
-		mdelay(200); 
+		/* ef44: libbt sends HCI_RESET right after power-on and never
+		 * retries; the BCM4334 often is not listening yet after 200 ms */
+		msleep(600);
 
 	} else {
 		for (pin = 0; pin < ARRAY_SIZE(bt_config_power_off); pin++) {
