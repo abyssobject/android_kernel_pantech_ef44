@@ -964,8 +964,13 @@ static int __init ext_display_setup(char *param)
 }
 early_param("ext_display", ext_display_setup);
 
+extern void ef44_ramlog_reserve(void);
+
+extern void __init msm8960_add_vidc_device(void);
+
 static void __init msm8960_reserve(void)
 {
+	ef44_ramlog_reserve();
 	msm8960_set_display_params(prim_panel_name, ext_panel_name);
 	msm_reserve();
 	if (msm8960_fmem_pdata.size) {
@@ -3933,6 +3938,7 @@ static void __init register_i2c_devices(void)
 	msm_spm_l2_init(msm_spm_l2_data);
 	msm8960_init_buses();
 	platform_add_devices(common_devices, ARRAY_SIZE(common_devices));
+	msm8960_add_vidc_device();
 	msm8960_pm8921_gpio_mpp_init();
 	platform_add_devices(sim_devices, ARRAY_SIZE(sim_devices));
 

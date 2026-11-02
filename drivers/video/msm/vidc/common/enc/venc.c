@@ -535,9 +535,13 @@ static u32 vid_enc_close_client(struct video_client_ctx *client_ctx)
 	return true;
 }
 
+extern int vidc_core_ready;
+
 static int vid_enc_open_client(struct video_client_ctx **vid_clnt_ctx,
 							   int flags)
 {
+	if (!vidc_core_ready)
+		return -ENODEV;
 	s32 client_index;
 	struct video_client_ctx *client_ctx;
 	int rc = 0;
@@ -612,11 +616,17 @@ static int vid_enc_open_client(struct video_client_ctx **vid_clnt_ctx,
 client_failure:
 	return rc;
 }
+extern int vidc_core_ready;
+
 static int vid_enc_open(struct inode *inode, struct file *file)
 {
 	int rc = 0;
 	struct video_client_ctx *client_ctx = NULL;
 	INFO("msm_vidc_venc: Inside %s()", __func__);
+	if (!vidc_core_ready) {
+		pr_err("%%s: vidc core not initialised\n", __func__);
+		return -ENODEV;
+	}
 	mutex_lock(&vid_enc_device_p->lock);
 	rc = vid_enc_open_client(&client_ctx, 0);
 	if (rc)

@@ -361,7 +361,10 @@ static void android_disable(struct android_dev *dev)
 		usb_gadget_disconnect(cdev->gadget);
 		/* Cancel pending control requests */
 		usb_ep_dequeue(cdev->gadget->ep0, cdev->req);
-		usb_remove_config(cdev, &android_config_driver);
+		/* usb_add_config() clears ->cdev when a function fails to bind;
+		 * removing that config again would corrupt the config list */
+		if (android_config_driver.cdev)
+			usb_remove_config(cdev, &android_config_driver);
 	}
 }
 

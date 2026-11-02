@@ -135,6 +135,10 @@ static void vidc_work_handler(struct work_struct *work)
 
 static DECLARE_WORK(vidc_work, vidc_work_handler);
 
+/* ef44: set once vidc_init() fully succeeded; checked by venc/vdec open */
+int vidc_core_ready;
+EXPORT_SYMBOL(vidc_core_ready);
+
 static int __devinit vidc_720p_probe(struct platform_device *pdev)
 {
 	struct resource *resource;
@@ -288,7 +292,8 @@ static int __init vidc_init(void)
 			 "vidc", vidc_device_p->device);
 
 	if (unlikely(rc)) {
-		ERR("%s() :request_irq failed\n", __func__);
+		ERR("%s() :request_irq(%d) failed %d\n", __func__,
+			vidc_device_p->irq, rc);
 		goto error_vidc_request_irq;
 	}
 	res_trk_init(vidc_device_p->device, vidc_device_p->irq);
@@ -323,6 +328,7 @@ static int __init vidc_init(void)
 				(u32 *) &vidc_debug_level);
 	}
 #endif
+	vidc_core_ready = 1;
 	return 0;
 
 error_vidc_create_workqueue:

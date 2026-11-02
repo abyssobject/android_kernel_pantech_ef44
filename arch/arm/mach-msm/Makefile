@@ -446,3 +446,4 @@ ifdef CONFIG_PANTECH_WLAN_BRCM
 obj-$(CONFIG_SKY_PANMAC) += panmac.o
 endif
 obj-$(CONFIG_MSM_EVENT_TIMER)		+= event_timer.o
+obj-y += ef44_ramlog.o
