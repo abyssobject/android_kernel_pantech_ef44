@@ -3938,7 +3938,6 @@ static void __init register_i2c_devices(void)
 	msm_spm_l2_init(msm_spm_l2_data);
 	msm8960_init_buses();
 	platform_add_devices(common_devices, ARRAY_SIZE(common_devices));
-	msm8960_add_vidc_device();
 	msm8960_pm8921_gpio_mpp_init();
 	platform_add_devices(sim_devices, ARRAY_SIZE(sim_devices));
 
@@ -4069,6 +4068,7 @@ static void __init msm8960_cdp_init(void)
        if ((soc_smem_id_vendor1_ptr->hw_rev == 5) ||(soc_smem_id_vendor1_ptr->hw_rev == 6))
        	platform_device_register(&msm_device_i2c_gpio_max17058);
 #endif
+	msm8960_add_vidc_device();
 	msm8960_pm8921_gpio_mpp_init();
 	platform_add_devices(cdp_devices, ARRAY_SIZE(cdp_devices));
 	msm8960_init_smsc_hub();
