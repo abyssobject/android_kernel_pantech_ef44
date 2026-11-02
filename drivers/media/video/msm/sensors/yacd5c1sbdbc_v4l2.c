@@ -247,6 +247,9 @@ static struct msm_sensor_id_info_t yacd5c1sbdbc_id_info = {
 	.sensor_id = YACD5C1SBDBC_MODEL_ID,
 #elif defined(CONFIG_MACH_MSM8960_MAGNUS)
 	.sensor_id = 0, //YACD5C1SBDBC_MODEL_ID,
+#elif defined(CONFIG_MACH_MSM8960_EF44S)
+	/* EF44S: as in Pantech stock */
+	.sensor_id = 0, //YACD5C1SBDBC_MODEL_ID,
 #endif
 };
 
@@ -275,6 +278,8 @@ static struct i2c_driver yacd5c1sbdbc_i2c_driver = {
 	.probe  = msm_sensor_i2c_probe,
 #elif defined(CONFIG_MACH_MSM8960_MAGNUS)
 	.probe  = yacd5c1sbdbc_sensor_i2c_probe,
+#elif defined(CONFIG_MACH_MSM8960_EF44S)
+	.probe  = msm_sensor_i2c_probe,
 #endif
 	.driver = {
 		.name = SENSOR_NAME,
