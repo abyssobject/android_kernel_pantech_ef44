@@ -26,7 +26,7 @@
 #include <linux/slab.h>
 #include <asm/mach-types.h>
 #include <asm/uaccess.h> //TOUCH_REACTION_RATE
-#include "../../../../include/pantech/BOARD_REV.h" // mirinae_2011092
+//#include "../../../../../pantech/include/BOARD_REV.h" // mirinae_20110920
 #include "qt602240.h"
 #ifdef ITO_TYPE_CHECK		//P13106 
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
@@ -2477,6 +2477,7 @@ uint8_t read_id_block(info_id_t *id)
 	status = read_mem(0, 1, (void *) &id->family_id);
 	if (status != READ_MEM_OK) goto read_id_block_exit;
 	dbg("family_id = %d\n",id->family_id);
+	printk(KERN_INFO "[TSP] ef44 id: family=%d\n", id->family_id);
 
 	status = read_mem(1, 1, (void *) &id->variant_id);
 	if (status != READ_MEM_OK) goto read_id_block_exit;
@@ -2714,7 +2715,7 @@ void quantum_touch_probe(void)
 		dbg("\n[TSP] Touch device found\n");
 	}
 	else {
-		dbg("\n[TSP][ERROR] Touch device NOT found\n");
+		printk(KERN_ERR "[TSP] ef44: touch device NOT found\n");
 		return ;
 	}
 
@@ -3992,6 +3993,34 @@ static int  qt602240_late_resume(struct early_suspend *h)
 
 
 /* I2C driver probe function */
+/* ef44: at probe time the mXT224E answers its ID block with 0xFF; it only
+ * becomes readable later in boot. Keep the IRQ masked (CHG is held low, so
+ * it would storm) and retry from a workqueue until the chip responds. */
+static void ef44_tsp_retry_func(struct work_struct *work);
+static DECLARE_DELAYED_WORK(ef44_tsp_retry_work, ef44_tsp_retry_func);
+static int ef44_tsp_retries;
+
+static void ef44_tsp_retry_func(struct work_struct *work)
+{
+	if (driver_setup == DRIVER_SETUP_OK)
+		return;
+	if (ef44_tsp_retries % 5 == 4) {
+		TSP_Restart();
+		msleep(100);
+	}
+	quantum_touch_probe();
+	if (driver_setup == DRIVER_SETUP_OK) {
+		printk(KERN_INFO "[TSP] ef44: touch found after %d retries\n",
+		       ef44_tsp_retries + 1);
+		enable_irq(qt602240_data->client->irq);
+		return;
+	}
+	if (++ef44_tsp_retries < 180)
+		schedule_delayed_work(&ef44_tsp_retry_work, HZ);
+	else
+		printk(KERN_ERR "[TSP] ef44: giving up on touch controller\n");
+}
+
 static int __devinit qt602240_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int rc;
@@ -4144,6 +4173,7 @@ static int __devinit qt602240_probe(struct i2c_client *client, const struct i2c_
 	quantum_touch_probe();
 #endif
 
+
 #ifdef CHIP_NOINIT
 	if(Chip_NoInit)
 	{
@@ -4159,6 +4189,10 @@ static int __devinit qt602240_probe(struct i2c_client *client, const struct i2c_
 #else
 	rc = request_irq(qt602240_data->client->irq, qt602240_irq_handler, IRQF_TRIGGER_FALLING, "qt602240-irq", qt602240_data);
 #endif //INT_LEVEL
+	if (!rc && driver_setup != DRIVER_SETUP_OK) {
+		disable_irq(qt602240_data->client->irq);
+		schedule_delayed_work(&ef44_tsp_retry_work, HZ);
+	}
 	if (!rc){
 		dbg("request_irq : success.\n");
 		dbg("qt602240_probe: Start touchscreen %s\n", qt602240_data->input_dev->name);
