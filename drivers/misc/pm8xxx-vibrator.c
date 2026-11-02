@@ -149,7 +149,9 @@ static int pm8xxx_vib_set(struct pm8xxx_vib *vib, int on)
 #ifdef PAN_HS_VIB_ALL_VOLUME_CTL 
 		val= 0;
 #else
-		val = vib->reg_vib_drv;
+		/* ef44: drive the motor in manual mode like Pantech stock does; the
+		 * reset value keeps the low enable-mode bits (0x3) set */
+		val = vib->reg_vib_drv & ~0x3;
 #endif
 		val |= ((vib->level << VIB_DRV_SEL_SHIFT) & VIB_DRV_SEL_MASK);
 #ifdef CONFIG_PANTECH_VIBRATOR
