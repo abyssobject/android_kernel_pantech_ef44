@@ -61,7 +61,22 @@ int ef44_force_recovery;
 extern void *restart_reason;
 
 static int autorecovery_secs;
-module_param(autorecovery_secs, int, 0644);
+
+/* writing 0 (e.g. from init on sys.boot_completed) disarms it right away */
+static int autorecovery_set(const char *val, const struct kernel_param *kp)
+{
+	int ret = param_set_int(val, kp);
+
+	if (!ret && autorecovery_secs <= 0)
+		ef44_force_recovery = 0;
+	return ret;
+}
+
+static struct kernel_param_ops autorecovery_ops = {
+	.set	= autorecovery_set,
+	.get	= param_get_int,
+};
+module_param_cb(autorecovery_secs, &autorecovery_ops, &autorecovery_secs, 0644);
 
 static void ramlog_write(struct console *con, const char *s, unsigned int n)
 {
