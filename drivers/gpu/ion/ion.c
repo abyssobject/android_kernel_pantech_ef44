@@ -1304,11 +1304,68 @@ end:
 }
 EXPORT_SYMBOL(ion_import_dma_buf);
 
+/*
+ * ef44: ioctl numbers of the 2012 ION userspace API, still used by the JB
+ * camera blobs. ALLOC carried the heap mask and the cached bit (bit 0) in one
+ * flags word; IMPORT was declared with an int; cache ops and GET_FLAGS lived
+ * under the 'I' magic.
+ */
+struct ion_allocation_data_old {
+	size_t len;
+	size_t align;
+	unsigned int flags;
+	struct ion_handle *handle;
+};
+
+#define ION_IOC_ALLOC_OLD	_IOWR(ION_IOC_MAGIC, 0, \
+				      struct ion_allocation_data_old)
+#define ION_IOC_IMPORT_OLD	_IOWR(ION_IOC_MAGIC, 5, int)
+#define ION_IOC_CLEAN_CACHES_OLD	_IOWR(ION_IOC_MAGIC, 7, \
+						struct ion_flush_data)
+#define ION_IOC_INV_CACHES_OLD	_IOWR(ION_IOC_MAGIC, 8, \
+						struct ion_flush_data)
+#define ION_IOC_CLEAN_INV_CACHES_OLD	_IOWR(ION_IOC_MAGIC, 9, \
+						struct ion_flush_data)
+#define ION_IOC_GET_FLAGS_OLD	_IOWR(ION_IOC_MAGIC, 10, \
+						struct ion_flag_data)
+
 static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct ion_client *client = filp->private_data;
 
 	switch (cmd) {
+	case ION_IOC_ALLOC_OLD:
+	{
+		struct ion_allocation_data_old data;
+		unsigned int flags;
+
+		if (copy_from_user(&data, (void __user *)arg, sizeof(data)))
+			return -EFAULT;
+		flags = data.flags & (ION_FLAG_CACHED | ION_FLAG_SECURE);
+		data.handle = ion_alloc(client, data.len, data.align,
+					data.flags & ~flags, flags);
+
+		if (IS_ERR(data.handle))
+			return PTR_ERR(data.handle);
+
+		if (copy_to_user((void __user *)arg, &data, sizeof(data))) {
+			ion_free(client, data.handle);
+			return -EFAULT;
+		}
+		break;
+	}
+	case ION_IOC_CLEAN_CACHES_OLD:
+		return client->dev->custom_ioctl(client,
+						ION_IOC_CLEAN_CACHES, arg);
+	case ION_IOC_INV_CACHES_OLD:
+		return client->dev->custom_ioctl(client,
+						ION_IOC_INV_CACHES, arg);
+	case ION_IOC_CLEAN_INV_CACHES_OLD:
+		return client->dev->custom_ioctl(client,
+						ION_IOC_CLEAN_INV_CACHES, arg);
+	case ION_IOC_GET_FLAGS_OLD:
+		return client->dev->custom_ioctl(client,
+						ION_IOC_GET_FLAGS, arg);
 	case ION_IOC_ALLOC:
 	{
 		struct ion_allocation_data data;
@@ -1362,6 +1419,7 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return data.fd;
 		break;
 	}
+	case ION_IOC_IMPORT_OLD:
 	case ION_IOC_IMPORT:
 	{
 		struct ion_fd_data data;
