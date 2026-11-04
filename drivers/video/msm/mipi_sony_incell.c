@@ -531,9 +531,15 @@ static void mipi_sony_set_backlight(struct msm_fb_data_type *mfd)
 #endif
 	mutex_lock(&sony_state.lcd_mutex);	
 
-	wrdisbv[1] = mipi_sony_backlight_tbl[bl_level];
+	/*
+	 * EF44_BL_OFF: level 0 means off. The table's lowest entry is 5, which
+	 * still lights the panel; stock only reaches "off" through lcd_off,
+	 * but recovery blanks by brightness alone. Send 0 and drop the
+	 * backlight enable after it, as lcd_off does.
+	 */
+	wrdisbv[1] = bl_level ? mipi_sony_backlight_tbl[bl_level] : 0;
 
-	if(!gpio_get_value_cansleep(gpio_lcd_bl_en))
+	if(bl_level && !gpio_get_value_cansleep(gpio_lcd_bl_en))
 		 gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_HIGH_VALUE);
 
 	mipi_set_tx_power_mode(0);
@@ -552,6 +558,9 @@ static void mipi_sony_set_backlight(struct msm_fb_data_type *mfd)
 #endif
 	prev_bl_level = mfd->bl_level;	
 	mipi_set_tx_power_mode(1);
+
+	if (!bl_level && gpio_get_value_cansleep(gpio_lcd_bl_en))
+		gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_LOW_VALUE);
 
 	mutex_unlock(&sony_state.lcd_mutex);	
 
