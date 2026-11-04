@@ -4692,6 +4692,19 @@ static int __devinit qt602240_probe(struct i2c_client *client, const struct i2c_
 #endif //SKY_PROCESS_CMD_KEY    
 
 
+#if defined(CONFIG_PM) && defined(CONFIG_HAS_EARLYSUSPEND)
+	/*
+	 * EF44_TOUCH_BOOT_CAL: stock recalibrates the chip and opens the touch
+	 * auto-calibration window ("protection mode") only in late_resume. A
+	 * finger or noise seen while the chip calibrated here then stays a stuck
+	 * touch (T8 TCHAUTOCAL is 0) until the first screen off/on, which never
+	 * comes in recovery: every later tap is a second finger and is ignored.
+	 * Run the same sequence once at boot; late_resume re-enables the IRQ.
+	 */
+	disable_irq(qt602240_data->client->irq);
+	qt602240_late_resume(NULL);
+#endif
+
 	dbg_func_out();
 	return 0;
 
