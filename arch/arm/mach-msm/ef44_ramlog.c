@@ -16,6 +16,10 @@
  * reset that goes through msm_restart land in recovery, and reboots into
  * recovery by itself after N seconds unless the parameter is set to 0 through
  * /sys/module/ef44_ramlog/parameters/autorecovery_secs first.
+ *
+ * ef44_ramlog.autoreboot_secs=N does the same with a normal reboot: a new
+ * recovery under test that hangs comes back to Android by itself, with its
+ * log kept in the window.
  */
 
 #include <linux/console.h>
@@ -160,3 +164,28 @@ static int __init ef44_autorecovery_init(void)
 	return 0;
 }
 late_initcall_sync(ef44_autorecovery_init);
+
+static int autoreboot_secs;
+module_param(autoreboot_secs, int, 0644);
+
+static void autoreboot_fn(struct work_struct *work)
+{
+	if (autoreboot_secs <= 0) {
+		pr_info("ef44_ramlog: autoreboot cancelled\n");
+		return;
+	}
+	pr_emerg("ef44_ramlog: boot not confirmed after %d s, rebooting\n",
+		 autoreboot_secs);
+	kernel_restart("normal");
+}
+static DECLARE_DELAYED_WORK(autoreboot_work, autoreboot_fn);
+
+static int __init ef44_autoreboot_init(void)
+{
+	if (autoreboot_secs <= 0)
+		return 0;
+	schedule_delayed_work(&autoreboot_work, autoreboot_secs * HZ);
+	pr_info("ef44_ramlog: autoreboot armed for %d s\n", autoreboot_secs);
+	return 0;
+}
+late_initcall_sync(ef44_autoreboot_init);
