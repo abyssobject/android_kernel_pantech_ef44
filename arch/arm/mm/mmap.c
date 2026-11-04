@@ -71,10 +71,10 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		start_addr = addr = TASK_UNMAPPED_BASE;
 	        mm->cached_hole_size = 0;
 	}
-	/* 8 bits of randomness in 20 address space bits */
+	/* vm.mmap_rnd_bits (default 8) bits of page-granular randomness */
 	if ((current->flags & PF_RANDOMIZE) &&
 	    !(current->personality & ADDR_NO_RANDOMIZE))
-		addr += (get_random_int() % (1 << 8)) << PAGE_SHIFT;
+		addr += (get_random_int() & ((1UL << mmap_rnd_bits) - 1)) << PAGE_SHIFT;
 
 full_search:
 	if (do_align)

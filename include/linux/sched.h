@@ -383,6 +383,12 @@ struct user_namespace;
 
 extern int sysctl_max_map_count;
 
+#ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+extern const int mmap_rnd_bits_min;
+extern const int mmap_rnd_bits_max;
+extern int mmap_rnd_bits __read_mostly;
+#endif
+
 #include <linux/aio.h>
 
 #ifdef CONFIG_MMU
