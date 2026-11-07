@@ -57,7 +57,7 @@ EXPORT_SYMBOL(vfs_getattr);
 
 int vfs_fstat(unsigned int fd, struct kstat *stat)
 {
-	struct file *f = fget(fd);
+	struct file *f = fget_raw(fd);
 	int error = -EBADF;
 
 	if (f) {
@@ -94,6 +94,88 @@ out:
 	return error;
 }
 EXPORT_SYMBOL(vfs_fstatat);
+
+/*
+ * statx(2), Linux 4.11 ABI, backported for Android 12 userspace (bionic,
+ * libc++ filesystem and HWUI's font cache call it and got ENOSYS). Only
+ * the basic stats this kernel has are reported (no birth time or
+ * attributes); stx_mask says so, as callers expect from older filesystems.
+ */
+struct statx_ts_compat {
+	__s64	tv_sec;
+	__u32	tv_nsec;
+	__s32	__reserved;
+};
+
+struct statx_compat {
+	__u32	stx_mask;
+	__u32	stx_blksize;
+	__u64	stx_attributes;
+	__u32	stx_nlink;
+	__u32	stx_uid;
+	__u32	stx_gid;
+	__u16	stx_mode;
+	__u16	__spare0[1];
+	__u64	stx_ino;
+	__u64	stx_size;
+	__u64	stx_blocks;
+	__u64	stx_attributes_mask;
+	struct statx_ts_compat	stx_atime;
+	struct statx_ts_compat	stx_btime;
+	struct statx_ts_compat	stx_ctime;
+	struct statx_ts_compat	stx_mtime;
+	__u32	stx_rdev_major;
+	__u32	stx_rdev_minor;
+	__u32	stx_dev_major;
+	__u32	stx_dev_minor;
+	__u64	__spare2[14];
+};
+
+#define STATX_BASIC_STATS_COMPAT	0x000007ffU
+#define AT_STATX_SYNC_TYPE_COMPAT	0x6000
+
+SYSCALL_DEFINE5(statx, int, dfd, const char __user *, filename,
+		unsigned int, flags, unsigned int, mask,
+		struct statx_compat __user *, buffer)
+{
+	struct statx_compat tmp;
+	struct kstat stat;
+	int error;
+
+	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH |
+		      AT_STATX_SYNC_TYPE_COMPAT))
+		return -EINVAL;
+	if ((flags & AT_STATX_SYNC_TYPE_COMPAT) == AT_STATX_SYNC_TYPE_COMPAT)
+		return -EINVAL;
+
+	error = vfs_fstatat(dfd, filename, &stat,
+			    flags & ~AT_STATX_SYNC_TYPE_COMPAT);
+	if (error)
+		return error;
+
+	memset(&tmp, 0, sizeof(tmp));
+	tmp.stx_mask = STATX_BASIC_STATS_COMPAT;
+	tmp.stx_blksize = stat.blksize;
+	tmp.stx_nlink = stat.nlink;
+	tmp.stx_uid = stat.uid;
+	tmp.stx_gid = stat.gid;
+	tmp.stx_mode = stat.mode;
+	tmp.stx_ino = stat.ino;
+	tmp.stx_size = stat.size;
+	tmp.stx_blocks = stat.blocks;
+	tmp.stx_atime.tv_sec = stat.atime.tv_sec;
+	tmp.stx_atime.tv_nsec = stat.atime.tv_nsec;
+	tmp.stx_mtime.tv_sec = stat.mtime.tv_sec;
+	tmp.stx_mtime.tv_nsec = stat.mtime.tv_nsec;
+	tmp.stx_ctime.tv_sec = stat.ctime.tv_sec;
+	tmp.stx_ctime.tv_nsec = stat.ctime.tv_nsec;
+	tmp.stx_rdev_major = MAJOR(stat.rdev);
+	tmp.stx_rdev_minor = MINOR(stat.rdev);
+	tmp.stx_dev_major = MAJOR(stat.dev);
+	tmp.stx_dev_minor = MINOR(stat.dev);
+
+	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
+}
 
 int vfs_stat(const char __user *name, struct kstat *stat)
 {

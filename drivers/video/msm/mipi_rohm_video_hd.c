@@ -72,13 +72,9 @@ static int __init mipi_video_rohm_wxga_init(void)
 	 * include dummy(pad) data of 200 clk in addition to
 	 * width and porch/sync width values
 	 */
+	//pinfo.lcdc.xres_pad = 0;   //184 : 500Mbps,  68 :440Mbps
+	//pinfo.lcdc.yres_pad = 0;
 
-	pinfo.lcdc.xres_pad = 0;   //184 : 500Mbps,  68 :440Mbps
-	pinfo.lcdc.yres_pad = 0;
-/*
-	pinfo.mipi.xres_pad = 0;
-	pinfo.mipi.yres_pad = 0;
-*/
 	pinfo.type = MIPI_VIDEO_PANEL;
 	pinfo.pdest = DISPLAY_1;
 	pinfo.wait_cycle = 0;
@@ -100,8 +96,7 @@ static int __init mipi_video_rohm_wxga_init(void)
 	pinfo.lcdc.border_clr = 0;	/* blk */
 	pinfo.lcdc.underflow_clr = 0xff;	/* blue */
 	pinfo.lcdc.hsync_skew = 0;
-	pinfo.bl_max = 16; //p12281 2013.07.03 16 level
-//	pinfo.bl_max = 31;
+	pinfo.bl_max = 16;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
 #if defined (MIPI_CLOCK_440MBPS)     
@@ -143,10 +138,10 @@ static int __init mipi_video_rohm_wxga_init(void)
 #else
 	pinfo.mipi.frame_rate = 57; //60;
 #endif
- 	pinfo.mipi.esc_byte_ratio = 2;
 	pinfo.mipi.dsi_phy_db = &dsi_video_mode_phy_db;
 	pinfo.mipi.tx_eot_append = TRUE;
       //pinfo.mipi.force_clk_lane_hs = 1;
+      pinfo.mipi.esc_byte_ratio = 4;  // 20120621, kkcho, added after 1023-patch
     
 	ret = mipi_rohm_device_register(&pinfo, MIPI_DSI_PRIM,
 						MIPI_DSI_PANEL_WVGA_PT);

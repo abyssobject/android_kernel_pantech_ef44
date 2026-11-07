@@ -14,6 +14,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/msm_ion.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
@@ -704,7 +705,7 @@ static int audio_aio_ion_add(struct q6audio_aio *audio,
 		goto flag_error;
 	}
 
-	temp_ptr = ion_map_kernel(audio->client, handle, ionflag);
+	temp_ptr = ion_map_kernel(audio->client, handle);
 	if (IS_ERR_OR_NULL(temp_ptr)) {
 		pr_err("%s: could not get virtual address\n", __func__);
 		goto map_error;

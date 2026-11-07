@@ -192,7 +192,7 @@ static int evdev_ungrab(struct evdev *evdev, struct evdev_client *client)
 		return  -EINVAL;
 
 	rcu_assign_pointer(evdev->grab, NULL);
-	synchronize_rcu();
+	synchronize_rcu_expedited();
 	input_release_device(&evdev->handle);
 
 	return 0;
@@ -212,7 +212,7 @@ static void evdev_detach_client(struct evdev *evdev,
 	spin_lock(&evdev->client_lock);
 	list_del_rcu(&client->node);
 	spin_unlock(&evdev->client_lock);
-	synchronize_rcu();
+	synchronize_rcu_expedited();
 }
 
 static int evdev_open_device(struct evdev *evdev)

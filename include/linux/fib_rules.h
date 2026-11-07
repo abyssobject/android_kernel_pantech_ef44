@@ -49,7 +49,15 @@ enum {
 	FRA_TABLE,	/* Extended table id */
 	FRA_FWMASK,	/* mask for netfilter mark */
 	FRA_OIFNAME,
+	FRA_UID_START,	/* UID range (old Android ABI; FRA_PAD upstream) */
+	FRA_UID_END,	/* (FRA_L3MDEV upstream) */
+	FRA_UID_RANGE,	/* UID range, upstream ABI used by Android 12 netd */
 	__FRA_MAX
+};
+
+struct fib_rule_uid_range {
+	__u32		start;
+	__u32		end;
 };
 
 #define FRA_MAX (__FRA_MAX - 1)

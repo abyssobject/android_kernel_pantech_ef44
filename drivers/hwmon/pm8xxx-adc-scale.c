@@ -101,7 +101,32 @@ static const struct pm8xxx_adc_map_pt adcmap_btm_threshold[] = {
 	{700,	581}, 
 	{750,	562}, 
 	{800,   546}
-#endif /* CONFIG_MACH_MSM8960_MAGNUS */
+#elif defined(CONFIG_MACH_MSM8960_EF44S)
+	/* From the Pantech IM-A840S stock kernel. Without it the table was
+	 * empty on ef44s and the battery temperature always read 0. */
+	{-250,	1598},
+	{-200,	1551},
+	{-150,	1496},
+	{-100,	1433},
+	{-50,	1365},
+	{0,	1290},
+	{50,	1211},
+	{100,	1129},
+	{150,	1046},
+	{200,	963},
+	{250,	882},
+	{300,	804},
+	{350,	730},
+	{400,	661},
+	{450,	598},
+	{500,	541},
+	{550,	489},
+	{600,	442},
+	{650,	401},
+	{700,	364},
+	{750,	332},
+	{800,	303}
+#endif /* CONFIG_MACH_MSM8960_MAGNUS / EF44S */
 #else /* CONFIG_PANTECH_BMS */
 	{-300,	1642},
 	{-200,	1544},

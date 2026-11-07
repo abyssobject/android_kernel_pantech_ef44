@@ -360,8 +360,14 @@ struct cpu_vfs_cap_data {
 
 #define CAP_WAKE_ALARM            35
 
+/* Allow preventing system suspends (upstream 3.5; Android 12 services list
+ * it in their init capabilities, and init rejects the whole line for a
+ * capability the kernel does not know) */
 
-#define CAP_LAST_CAP         CAP_WAKE_ALARM
+#define CAP_BLOCK_SUSPEND    36
+
+
+#define CAP_LAST_CAP         CAP_BLOCK_SUSPEND
 
 #define cap_valid(x) ((x) >= 0 && (x) <= CAP_LAST_CAP)
 

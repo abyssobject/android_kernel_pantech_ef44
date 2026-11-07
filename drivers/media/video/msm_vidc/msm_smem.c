@@ -12,6 +12,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/msm_ion.h>
 #include <mach/iommu_domains.h>
 #include "msm_smem.h"
 
@@ -116,7 +117,7 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 	size = (size + 4095) & (~4095);
 	pr_debug("\n in %s domain: %d, Partition: %d\n",
 		__func__, domain, partition);
-	hndl = ion_alloc(client->clnt, size, align, ionflags);
+	hndl = ion_alloc(client->clnt, size, align, ionflags, 0);
 	if (IS_ERR_OR_NULL(hndl)) {
 		pr_err("Failed to allocate shared memory = %p, %d, %d, 0x%lx\n",
 				client, size, align, ionflags);
@@ -128,7 +129,7 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 	mem->domain = domain;
 	mem->partition_num = partition;
 	if (map_kernel) {
-		mem->kvaddr = ion_map_kernel(client->clnt, hndl, 0);
+		mem->kvaddr = ion_map_kernel(client->clnt, hndl);
 		if (!mem->kvaddr) {
 			pr_err("Failed to map shared mem in kernel\n");
 			rc = -EIO;

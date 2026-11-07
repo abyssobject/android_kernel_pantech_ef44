@@ -84,6 +84,17 @@
 #define O_PATH		010000000
 #endif
 
+/*
+ * Before Linux 3.11 the kernel has no O_TMPFILE; the definition is only
+ * here for userspace built against these headers (Android 12 bionic's
+ * fortified open() refers to it). Unknown open flags are ignored.
+ */
+#ifndef __O_TMPFILE
+#define __O_TMPFILE	020000000
+#endif
+#define O_TMPFILE (__O_TMPFILE | O_DIRECTORY)
+#define O_TMPFILE_MASK (__O_TMPFILE | O_DIRECTORY | O_CREAT)
+
 #ifndef O_NDELAY
 #define O_NDELAY	O_NONBLOCK
 #endif

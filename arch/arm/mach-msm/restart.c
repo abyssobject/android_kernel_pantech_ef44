@@ -56,6 +56,7 @@
 
 static int restart_mode;
 void *restart_reason;
+extern int ef44_force_recovery;
 
 int pmic_reset_irq;
 static void __iomem *msm_tmr0_base;
@@ -308,6 +309,9 @@ void msm_restart(char mode, const char *cmd)
 #endif /* CONFIG_PANTECH_ERR_CRASH_LOGGING */
 	}
 
+	if (ef44_force_recovery)
+		__raw_writel(0x77665502, restart_reason);
+
 #ifdef CONFIG_PANTECH_ERR_CRASH_LOGGING
 	writel(NORMAL_RESET_MAGIC_NUM, restart_reason+4);
 #endif /* CONFIG_PANTECH_ERR_CRASH_LOGGING */
@@ -350,6 +354,8 @@ static int __init msm_pmic_restart_init(void)
 #if defined(CONFIG_PANTECH_ERR_CRASH_LOGGING)
 	__raw_writel(SYS_RESET_REASON_ABNORMAL, restart_reason);
 #endif /* CONFIG_PANTECH_ERR_CRASH_LOGGING */
+	if (ef44_force_recovery)
+		__raw_writel(0x77665502, restart_reason);
 
 	if (pmic_reset_irq != 0) {
 		rc = request_any_context_irq(pmic_reset_irq,

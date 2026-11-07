@@ -646,7 +646,11 @@ static const u32 __wl_cipher_suites[] = {
 	WLAN_CIPHER_SUITE_WEP104,
 	WLAN_CIPHER_SUITE_TKIP,
 	WLAN_CIPHER_SUITE_CCMP,
-	WLAN_CIPHER_SUITE_AES_CMAC,
+	/* EF44: no AES_CMAC. The BCM4334 firmware cannot install a BIP (IGTK)
+	 * key, so a WPA2 AP offering optional PMF (802.11w, e.g. an iPhone
+	 * hotspot) got "Failed to configure IGTK" right after the 4-way
+	 * handshake and the link was dropped. Without BIP advertised,
+	 * wpa_supplicant connects with PMF off. */
 #ifdef BCMWAPI_WPI
 	WLAN_CIPHER_SUITE_SMS4
 #endif

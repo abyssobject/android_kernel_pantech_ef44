@@ -138,10 +138,38 @@ static struct scatterlist *mmc_alloc_sg(int sg_len, int *err)
 	return sg;
 }
 
+/*
+ * Samsung moviNAND parts of the "eMMC brick bug" family (and the MAG2GA in
+ * the VEGA S5) can lock up or corrupt themselves on erase/trim. Android 12
+ * runs fstrim right after the first boot; on ef44 that hung the eMMC and the
+ * watchdog reset the phone. Never offer discard for them.
+ */
+static bool mmc_discard_unsafe(struct mmc_card *card)
+{
+	static const char * const names[] = {
+		"MAG2GA", "MAG2GC", "MAG4FA", "MBG8GC", "MCGAFA",
+		"VAL00M", "VYL00M", "KYL00M", "VZL00M",
+	};
+	int i;
+
+	if (card->cid.manfid != 0x15)	/* Samsung */
+		return false;
+	for (i = 0; i < ARRAY_SIZE(names); i++)
+		if (!strncmp(card->cid.prod_name, names[i], 6))
+			return true;
+	return false;
+}
+
 static void mmc_queue_setup_discard(struct request_queue *q,
 				    struct mmc_card *card)
 {
 	unsigned max_discard;
+
+	if (mmc_discard_unsafe(card)) {
+		pr_info("%s: %s: discard disabled (unsafe on this eMMC)\n",
+			mmc_hostname(card->host), card->cid.prod_name);
+		return;
+	}
 
 	max_discard = mmc_calc_max_discard(card);
 	if (!max_discard)

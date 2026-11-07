@@ -49,6 +49,17 @@
 #include <mach/msm_hsusb.h>
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_QT602240_MSM8960
+/*
+ * EF44: the Atmel touch controller's charger noise mode (qt602240.c). Pantech's
+ * framework switched it from user space (TOUCH_CHARGER_MODE ioctl); on
+ * LineageOS the charger tells it here.
+ */
+extern void qt602240_charger_changed(int plugged);
+#else
+static inline void qt602240_charger_changed(int plugged) { }
+#endif
+
 #if defined(PANTECH_CHARGER_MONITOR_TEST)
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
@@ -466,7 +477,7 @@ int get_max17058_soc(void)
 		if (adjsoc < 0)
 			adjsoc = 0;
 
-		pr_err("oem_soc = %d, adjsoc = %d\n", oem_soc, adjsoc);
+		pr_debug("oem_soc = %d, adjsoc = %d\n", oem_soc, adjsoc);
 
 		last_soc = adjsoc;
 	}
@@ -3941,7 +3952,7 @@ static int get_prop_batt_capacity(struct pm8921_chg_chip *chip)
 		chip->err_charge_done = true;
 #endif
 
-	pr_err("percent_soc : %d\n", percent_soc);
+	pr_debug("percent_soc : %d\n", percent_soc);
 
 	return percent_soc;
 }
@@ -4154,7 +4165,7 @@ static int get_prop_batt_temp(struct pm8921_chg_chip *chip)
 
 #if defined(CONFIG_PANTECH_BMS_TEST)
 	chip->current_temp = (int)(result.physical);
-	pr_err("battery temperature = %d\n", chip->current_temp/10);
+	pr_debug("battery temperature = %d\n", chip->current_temp/10);
 #endif
 
 	if (result.physical > MAX_TOLERABLE_BATT_TEMP_DDC)
@@ -4964,6 +4975,7 @@ static void handle_usb_insertion_removal(struct pm8921_chg_chip *chip)
 #endif
 		notify_usb_of_the_plugin_event(usb_present);
 		chip->usb_present = usb_present;
+		qt602240_charger_changed(usb_present);
 
 #if defined(PANTECH_BATT_CHARGE_DONE_IN_WARM_COOL)
 	if (!usb_present && chip->batt_charge_done_warm_cool)
@@ -6929,6 +6941,7 @@ static void __devinit determine_initial_state(struct pm8921_chg_chip *chip)
 
 	chip->dc_present = !!is_dc_chg_plugged_in(chip);
 	chip->usb_present = !!is_usb_chg_plugged_in(chip);
+	qt602240_charger_changed(chip->usb_present);
 
 	notify_usb_of_the_plugin_event(chip->usb_present);
 	if (chip->usb_present) {

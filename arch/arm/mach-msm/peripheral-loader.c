@@ -343,6 +343,10 @@ static void pil_set_state(struct pil_device *pil, enum pil_state state)
  *
  * If PIL is not enabled in the kernel, the value %NULL will be returned.
  */
+/* ef44 bring-up: leave the modem down (peripheral_loader.ef44_nomodem=1) */
+static bool ef44_nomodem;
+module_param(ef44_nomodem, bool, 0644);
+
 void *pil_get(const char *name)
 {
 	int ret;
@@ -352,6 +356,11 @@ void *pil_get(const char *name)
 
 	if (!name)
 		return NULL;
+
+	if (ef44_nomodem && (!strcmp(name, "modem") || !strcmp(name, "modem_fw"))) {
+		pr_info("pil: not booting %s (ef44_nomodem)\n", name);
+		return ERR_PTR(-ENODEV);
+	}
 
 	pil = retval = find_peripheral(name);
 	if (!pil)

@@ -43,3 +43,4 @@ obj-$(CONFIG_BLK_DEV_RBD)     += rbd.o
 obj-$(CONFIG_BLK_DEV_PCIESSD_MTIP32XX)	+= mtip32xx/
 
 swim_mod-y	:= swim.o swim_asm.o
+obj-$(CONFIG_ZRAM)	+= zram/
