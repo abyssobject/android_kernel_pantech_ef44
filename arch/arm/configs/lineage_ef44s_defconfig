@@ -14,7 +14,7 @@ CONFIG_CGROUP_FREEZER=y
 CONFIG_CGROUP_CPUACCT=y
 CONFIG_RESOURCE_COUNTERS=y
 CONFIG_CGROUP_SCHED=y
-CONFIG_RT_GROUP_SCHED=y
+# CONFIG_RT_GROUP_SCHED is not set
 CONFIG_NAMESPACES=y
 # CONFIG_UTS_NS is not set
 # CONFIG_IPC_NS is not set
@@ -739,7 +739,13 @@ CONFIG_INPUT_UINPUT=y
 CONFIG_FHANDLE=y
 CONFIG_ANDROID_PARANOID_NETWORK=y
 CONFIG_CGROUP_SCHED=y
-CONFIG_RT_GROUP_SCHED=y
+# No RT group scheduling: Android 12 runs apps and services in the cpu
+# cgroups top-app/foreground/system..., and with per-group RT budgets the
+# Bluetooth stack's SCHED_FIFO threads (A2DP encoder ~17% of a CPU with AAC)
+# hit the foreground group's limit and were throttled for hundreds of ms
+# (Bluetooth audio stuttered). Current Android kernels leave it off; the
+# global sched_rt_runtime_us limit still applies.
+# CONFIG_RT_GROUP_SCHED is not set
 CONFIG_ZRAM=y
 CONFIG_ZSMALLOC=y
 
