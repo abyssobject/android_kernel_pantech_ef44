@@ -74,5 +74,6 @@ struct kgsl_ptpool {
 
 void *kgsl_gpummu_ptpool_init(int entries);
 void kgsl_gpummu_ptpool_destroy(void *ptpool);
+void kgsl_gpummu_reset_pagetable(void *mmu_specific_pt);
 
 #endif /* __KGSL_GPUMMU_H */

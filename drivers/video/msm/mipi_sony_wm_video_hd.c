@@ -103,7 +103,9 @@ static int __init mipi_video_sony_wxga_init(void)
 #endif    
     
 	pinfo.lcdc.border_clr = 0;	/* blk */
-	pinfo.lcdc.underflow_clr = 0xff;	/* blue */
+	/* ef44: black, not blue: a momentary MDP underflow showed as a blue
+	 * flash across the whole screen */
+	pinfo.lcdc.underflow_clr = 0x00;
 	pinfo.lcdc.hsync_skew = 0;
 	pinfo.bl_max = 16;
 	pinfo.bl_min = 1;

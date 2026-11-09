@@ -412,12 +412,20 @@ int32_t msm_sensor_release(struct msm_sensor_ctrl_t *s_ctrl)
 	uint32_t delay = 0;
 	CDBG("%s called\n", __func__);
 	s_ctrl->func_tbl->sensor_stop_stream(s_ctrl);
-	if (s_ctrl->curr_res != MSM_SENSOR_INVALID_RES) {
+	/* EF44: the ce1502 ISP never sets frame length / line length (and may
+	 * have no output_settings), so this divided by zero on every close and
+	 * slept for a garbage time. Wait one frame only when the numbers make
+	 * sense, and never longer than 100 ms. */
+	if (s_ctrl->curr_res != MSM_SENSOR_INVALID_RES &&
+	    s_ctrl->msm_sensor_reg && s_ctrl->msm_sensor_reg->output_settings &&
+	    s_ctrl->curr_frame_length_lines && s_ctrl->curr_line_length_pclk) {
 		fps = s_ctrl->msm_sensor_reg->
 			output_settings[s_ctrl->curr_res].vt_pixel_clk /
 			s_ctrl->curr_frame_length_lines /
 			s_ctrl->curr_line_length_pclk;
-		delay = 1000 / fps;
+		delay = fps > 0 ? 1000 / fps : 0;
+		if (delay > 100)
+			delay = 100;
 		CDBG("%s fps = %ld, delay = %d\n", __func__, fps, delay);
 		msleep(delay);
 	}

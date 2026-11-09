@@ -1,4 +1,5 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/*
+ * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -107,6 +108,7 @@ int mdp_dsi_video_on(struct platform_device *pdev)
 
 	vsync_cntrl.dev = mfd->fbi->dev;
 	atomic_set(&vsync_cntrl.suspend, 0);
+	vsync_cntrl.vsync_irq_enabled = 0;
 	bpp = fbi->var.bits_per_pixel / 8;
 	buf = (uint8 *) fbi->fix.smem_start;
 
@@ -241,7 +243,7 @@ int mdp_dsi_video_on(struct platform_device *pdev)
 		/*Turning on DMA_P block*/
 		mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 	}
-
+	mdp_histogram_ctrl_all(TRUE);
 	/* MDP cmd block disable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 
@@ -251,6 +253,7 @@ int mdp_dsi_video_on(struct platform_device *pdev)
 int mdp_dsi_video_off(struct platform_device *pdev)
 {
 	int ret = 0;
+	mdp_histogram_ctrl_all(FALSE);
 	/* MDP cmd block enable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 	MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 0);
@@ -309,7 +312,7 @@ void mdp_dsi_video_update(struct msm_fb_data_type *mfd)
 	unsigned long flag;
 	int irq_block = MDP_DMA2_TERM;
 
-	if (!mfd->panel_power_on)
+	if (mdp_fb_is_power_off(mfd))
 		return;
 
 	down(&mfd->dma->mutex);

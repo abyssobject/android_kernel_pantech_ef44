@@ -321,11 +321,22 @@ static int msm_ipc_router_recvmsg(struct kiocb *iocb, struct socket *sock,
 		return -EINVAL;
 
 	lock_sock(sk);
-	timeout = sk->sk_rcvtimeo;
+	/*
+	 * Honour non-blocking reads (O_NONBLOCK sockets get MSG_DONTWAIT from
+	 * the socket layer). QCSI/QCCI set their IPC router sockets
+	 * non-blocking, select() on the data and control sockets and read each
+	 * ready one until it is empty. Blocking on the empty one instead stalls
+	 * the other: rmt_storage could sit on its control port while the
+	 * modem's first remote storage request waited on the server port, and
+	 * the modem never came up.
+	 */
+	timeout = sock_rcvtimeo(sk, flags & MSG_DONTWAIT);
 	mutex_lock(&port_ptr->port_rx_q_lock);
 	while (list_empty(&port_ptr->port_rx_q)) {
 		mutex_unlock(&port_ptr->port_rx_q_lock);
 		release_sock(sk);
+		if (flags & MSG_DONTWAIT)
+			return -EAGAIN;
 		if (timeout < 0) {
 			ret = wait_event_interruptible(
 					port_ptr->port_rx_wait_q,

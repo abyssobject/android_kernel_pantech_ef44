@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,27 +37,44 @@
 #include <linux/fb.h>
 #include <linux/list.h>
 #include <linux/types.h>
-
+#include <linux/switch.h>
 #include <linux/msm_mdp.h>
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif
 
 #include "msm_fb_panel.h"
 #include "mdp.h"
-
-#ifdef CONFIG_MACH_MSM8960_OSCAR
-#define CONFIG_ACL_FOR_RECOVERY
+/*20121116, kkcho,  need only sharp-ips for LCD-Flicker and burning*/
+#if defined(CONFIG_MACH_APQ8064_EF48S) || defined(CONFIG_MACH_APQ8064_EF49K) || defined(CONFIG_MACH_APQ8064_EF50L) || defined(CONFIG_MACH_APQ8064_EF51S) || defined(CONFIG_MACH_APQ8064_EF51K) || defined(CONFIG_MACH_APQ8064_EF51L)
+#define FEATURE_SKYDISP_DISPLAY_FLICKER_SHARP_IPS 
+#endif
+#define BOOT_TOUCH_RESET
+/* 130124, Get LCD Revision(2 or 3).
+ * CONFIG_PANTECH_LCD_GET_LCD_REV is defined in below files.
+ * kernel/drivers/video/msm/msm_fb.h
+ * kernel/include/linux/msm_mdp.h
+ * vendor/pantech/build/CUST_PANTECH_DISPLAY.h
+ */
+#if (defined(CONFIG_SKY_EF51S_BOARD)||defined(CONFIG_SKY_EF51K_BOARD)||defined(CONFIG_SKY_EF51L_BOARD))
+#define CONFIG_PANTECH_LCD_GET_LCD_REV
 #endif
 
 #define MSM_FB_DEFAULT_PAGE_SIZE 2
 #define MFD_KEY  0x11161126
 #define MSM_FB_MAX_DEV_LIST 32
 
+enum {
+	MDP_PANEL_POWER_OFF = 0,
+	MDP_PANEL_POWER_ON,
+	MDP_PANEL_POWER_DOZE,
+};
+
 struct disp_info_type_suspend {
 	boolean op_enable;
 	boolean sw_refreshing_enable;
-	boolean panel_power_on;
+	int panel_power_state;
 	boolean op_suspend;
 };
 
@@ -85,8 +102,9 @@ struct msm_fb_data_type {
 	DISP_TARGET dest;
 	struct fb_info *fbi;
 
-	struct delayed_work backlight_worker;
+	struct device *dev;
 	boolean op_enable;
+	struct delayed_work backlight_worker;
 	uint32 fb_imgType;
 	boolean sw_currently_refreshing;
 	boolean sw_refreshing_enable;
@@ -113,7 +131,7 @@ struct msm_fb_data_type {
 
 	struct hrtimer dma_hrtimer;
 
-	boolean panel_power_on;
+	int panel_power_state;
 	struct work_struct dma_update_worker;
 	struct semaphore sem;
 
@@ -143,6 +161,8 @@ struct msm_fb_data_type {
 	int (*stop_histogram) (struct fb_info *info, uint32_t block);
 	void (*vsync_ctrl) (int enable);
 	void (*vsync_init) (int cndx);
+	void (*update_panel_info)(struct msm_fb_data_type *mfd);
+	bool (*is_panel_ready)(void);
 	void *vsync_show;
 	void *cursor_buf;
 	void *cursor_buf_phys;
@@ -183,6 +203,7 @@ struct msm_fb_data_type {
 	struct list_head writeback_busy_queue;
 	struct list_head writeback_free_queue;
 	struct list_head writeback_register_queue;
+	struct switch_dev writeback_sdev;
 	wait_queue_head_t wait_q;
 	struct ion_client *iclient;
 	unsigned long display_iova;
@@ -194,8 +215,38 @@ struct msm_fb_data_type {
 	u32 mdp_rev;
 	u32 writeback_state;
 	bool writeback_active_cnt;
+	bool writeback_initialized;
 	int cont_splash_done;
+	void *cpu_pm_hdl;
+	u32 acq_fen_cnt;
+	struct sync_fence *acq_fen[MDP_MAX_FENCE_FD];
+	int cur_rel_fen_fd;
+	struct sync_pt *cur_rel_sync_pt;
+	struct sync_fence *cur_rel_fence;
+	struct sync_fence *last_rel_fence;
+	struct sw_sync_timeline *timeline;
+	int timeline_value;
+	u32 last_acq_fen_cnt;
+	struct sync_fence *last_acq_fen[MDP_MAX_FENCE_FD];
+	struct mutex sync_mutex;
+	struct completion commit_comp;
+	u32 is_committing;
+	struct work_struct commit_work;
+	void *msm_fb_backup;
+	boolean panel_driver_on;
 	int vsync_sysfs_created;
+	void *copy_splash_buf;
+	unsigned char *copy_splash_phys;
+	uint32 sec_mapped;
+	uint32 sec_active;
+	uint32 max_map_size;
+#ifdef CONFIG_F_SKYDISP_SKIP_BLSET_WITH_EFS_ERASE
+	int bl_set_first_skip;
+#endif	
+};
+struct msm_fb_backup_type {
+	struct fb_info info;
+	struct mdp_display_commit disp_commit;
 };
 
 struct dentry *msm_fb_get_debugfs_root(void);
@@ -215,13 +266,14 @@ int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 int msm_fb_detect_client(const char *name);
 int calc_fb_offset(struct msm_fb_data_type *mfd, struct fb_info *fbi, int bpp);
-
+void msm_fb_wait_for_fence(struct msm_fb_data_type *mfd);
+int msm_fb_signal_timeline(struct msm_fb_data_type *mfd);
+void msm_fb_release_timeline(struct msm_fb_data_type *mfd);
 #ifdef CONFIG_FB_BACKLIGHT
 void msm_fb_config_backlight(struct msm_fb_data_type *mfd);
 #endif
 
-void fill_black_screen(void);
-void unfill_black_screen(void);
+void fill_black_screen(bool on, uint8 pipe_num, uint8 mixer_num);
 int msm_fb_check_frame_rate(struct msm_fb_data_type *mfd,
 				struct fb_info *info);
 
@@ -229,5 +281,49 @@ int msm_fb_check_frame_rate(struct msm_fb_data_type *mfd,
 #define INIT_IMAGE_FILE "/initlogo.rle"
 int load_565rle_image(char *filename, bool bf_supported);
 #endif
+
+static inline bool mdp_panel_is_power_off(int panel_power_state)
+{
+	return (panel_power_state == MDP_PANEL_POWER_OFF);
+}
+
+static inline bool mdp_panel_is_power_on_interactive(int panel_power_state)
+{
+	return (panel_power_state == MDP_PANEL_POWER_ON);
+}
+
+static inline bool mdp_panel_is_power_on(int panel_power_state)
+{
+	return !mdp_panel_is_power_off(panel_power_state);
+}
+
+static inline bool mdp_panel_is_power_on_lp(int panel_power_state)
+{
+	return !mdp_panel_is_power_off(panel_power_state) &&
+		!mdp_panel_is_power_on_interactive(panel_power_state);
+}
+
+/* These functions take msm_fb_data_type */
+
+static inline bool mdp_fb_is_power_off(struct msm_fb_data_type *mfd)
+{
+	return (mfd->panel_power_state == MDP_PANEL_POWER_OFF);
+}
+
+static inline bool mdp_fb_is_power_on_interactive(struct msm_fb_data_type *mfd)
+{
+	return (mfd->panel_power_state == MDP_PANEL_POWER_ON);
+}
+
+static inline bool mdp_fb_is_power_on(struct msm_fb_data_type *mfd)
+{
+	return !mdp_fb_is_power_off(mfd);
+}
+
+static inline bool mdp_fb_is_power_on_lp(struct msm_fb_data_type *mfd)
+{
+	return !mdp_fb_is_power_off(mfd) &&
+		!mdp_fb_is_power_on_interactive(mfd);
+}
 
 #endif /* MSM_FB_H */

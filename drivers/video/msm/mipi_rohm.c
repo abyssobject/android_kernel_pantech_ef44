@@ -19,10 +19,9 @@
 #include "msm_fb.h"
 #include "mipi_dsi.h"
 #include "mipi_rohm.h"
-#include <mach/gpio.h>
+#include <linux/gpio.h>
 #include <asm/irq.h>
 #include <asm/system.h>
-#include <linux/mutex.h>
 
 #define GPIO_HIGH_VALUE 1
 #define GPIO_LOW_VALUE  0
@@ -51,46 +50,35 @@
 #define DEBUG_EN 0
 #endif
 
-#if 1 //BOARD_VER >= TP10)
 #define FEATURE_TP_SAMPLE
 #define FEATURE_ROHM_GAMMA_FIX
-//#define FEATURE_CABC_BL_MIN_SET
-#elif (BOARD_VER == WS20)
-//#define FEATURE_WS_SAMPLE
-#endif
 
 //#define FEATURE_ROHM_ID_READ
-//#define FEATURE_ROHM_DUMMY_SCAN_OFF
-
-//extern int gpio43, gpio16, gpio24; /* gpio43 :reset, gpio16:lcd bl en , gpio24:lcd_bl_ctrl */
-extern int gpio16, gpio24; /* gpio43 :reset, gpio16:lcd bl en , gpio24:lcd_bl_ctrl */
-DEFINE_MUTEX(bl_mutex);
-
-#ifndef FEATURE_ROHM_CABC_ON
-#define FEATURE_SKY_BACKLIGHT_TPS61161
+#define FEATURE_ROHM_DUMMY_SCAN_OFF  //20120607, kkcho, for High-resoultion movie play
+#if CONFIG_BOARD_VER >= CONFIG_WS20   // 20120502, [LS5]kkcho, PM_GPIO->MSM_GPIO
+#define SKY_LCD_VCI_EN_PIN_CHANGE  
 #endif
 
-#ifdef CONFIG_F_SKYDISP_SILENT_BOOT //silent boot p13832@shji
-#include "../../../arch/arm/mach-msm/sky_sys_reset.h"
-static int first_on = 1;
+#ifdef CONFIG_F_SKYDISP_CABC_CTRL
+//#define FEATURE_LOW_LEVEL_CABC_OFF // 20120908, kkcho, prevent screec-shake at the low-level backlight
+#define FEATURE_CABC_BL_MIN_SET
 #endif
-#ifdef FEATURE_SKY_BACKLIGHT_TPS61161
-//#define LCD_BL_EN        70    //gpio24 
-#define BL_MAX           31    //BL LEVEL
 
-#define T_LOW_LB          8    //LOGIC 0  (T_HIGH_LB*2)
-#define T_HIGH_LB         4    //LOGIC 0  (MIN 2us ~ 360us) 
-#define T_LOW_HB          4    //LOGIC 1  (MIN 2us ~ 360us) 
-#define T_HIGH_HB         8    //LOGIC 1  (T_LOW_HB*2)
-#define T_START           4    //2us
-#define T_EOS             4    //2us
-#define T_ES_DELAY      200    //100us
-#define T_ES_DETECT     500    //260us
-#define T_ES_WIN          1    //1ms
-#define T_SHUTDOWN        5    //5ms 
-#define NUM_ADDR_DIGIT    8    //0x72 
-#define NUM_DATA_DIGIT    8    //RFA(7)ADD1(6)ADD0(5)DATA(4:1)
-#define DEVICE_ADDR    0x72
+#ifdef CONFIG_F_SKYDISP_CHANGE_BL_TABLE_WHEN_OFFLINE_CHARGING
+unsigned int pantech_charging_status(void);
+static unsigned int is_offline_charging_mode = 0;
+#endif
+
+#ifdef CONFIG_F_SKYDISP_SILENT_BOOT
+#include <mach/pantech_sys.h>
+unsigned int is_silent_boot_mode, is_backlight_on_before_reset, is_silent_boot_mode_n_bl_off;
+#endif
+
+extern int gpio_lcd_mipi_reset, gpio_lcd_bl_en;/* gpio43 :gpio_lcd_mipi_reset, gpio16:lgpio_lcd_bl_en , */
+#ifdef SKY_LCD_VCI_EN_PIN_CHANGE
+#define LCD_VCI_EN 82
+#else
+extern int gpio_lcd_vci_en;
 #endif
 
 static struct msm_panel_common_pdata *mipi_rohm_pdata;
@@ -102,21 +90,22 @@ struct lcd_state_type {
     boolean disp_powered_up;
     boolean disp_initialized;
     boolean disp_on;
-#ifdef CONFIG_F_SKYDISP_CABC_FIX
-		int acl_flag;
+#ifdef CONFIG_F_SKYDISP_CABC_CTRL
+    int acl_flag;
 #endif
+	struct mutex lcd_mutex;
 };
 
 static struct lcd_state_type rohm_state = { 0, };
 
 #if defined (FEATURE_TP_SAMPLE)
 #if defined (FEATURE_ROHM_GAMMA_FIX)
-char extcctl[6]     = {0xdf, 0x55,0xaa,0x52,0x08,0x10};
+char extcctl[6]     = {0xdf, 0x55,0xaa,0x52,0x08,0x10}; 
 #ifdef FEATURE_ROHM_DUMMY_SCAN_OFF
 char scanmode_off[6]  ={0xf2, 0,0,0,0,0x6e};
 #endif
-char mtp_1[2]      = {0xf1, 0x08};
-char mtp_2[4]      = {0xf7, 0x25,0x00,0x3d};
+//char mtp_1[2]      = {0xf1, 0x08};
+//char mtp_2[4]      = {0xf7, 0x24,0x00,0x3d};
 char dfs_2[9]       = {0xb5, 0x00,0x01,0x00,0x00,0x00,0x04,0x00,0x00}; //PWM 39.2Khz
 //gamma 2.4
 char gcev_1[13]       = {0xC0,0x22,0xEC,0x22,0xEC,0x3D,0xEC,0x03,0xEC,0x03,0xEC,0x1E,0xEC};
@@ -183,24 +172,69 @@ char disp_on[2]     = {0x29, 0x00};
 char sleep_in[2]    = {0x10, 0x00};
 char disp_off[2]    = {0x28, 0x00};
 
+char Dot_work_change[9] = {0xb7, 0x00, 0x00, 0x02, 0x32, 0x32, 0x54, 0x54, 0x00};
+char Dot_work_change_TR[10] = {0xc8, 0x11, 0x19, 0x04, 0x0D, 0x28, 0x08, 0x00, 0x04, 0x00};
+
+#ifdef FEATURE_ROHM_BLACK_DATA_CMD
+char drv_ctrl[9] = {0xb7, 0x03, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+#endif
+
 #ifdef FEATURE_ROHM_CABC_ON
 char wdb[2]         = {0x51, 0x00};
-char wctrld[2]      = {0x53, 0x24};
+char wctrld[2]      = {0x53, 0x2c};
 //char cabc_on[2]     = {0x55, 0x00}; //CABC OFF 
 char cabc_on[2]     = {0x55, 0x03}; //MV MODE
 char cabc_off[2]     = {0x55, 0x00}; 
 //char cabc_on[2]     = {0x55, 0x02}; //ST MODE
 //char cabc_on[2]     = {0x55, 0x01}; //UI MODE
 #ifdef FEATURE_CABC_BL_MIN_SET
-char cabc_min_val[2] = {0x5e, 0x00};   //100% limit
+char cabc_min_val[2] = {0x5e, 70};   // min value is 70
+//char cabc_min_val[2] = {0x5e, 0x00};   //100% limit
 //char cabc_min_val[2] = {0x5e, 0x66};   //60% limit 
 //char cabc_min_val[2] = {0x5e, 0xb2};   //30% limit 
 //char cabc_min_val[2] = {0x5e, 0xe5};   //10% limit 
 #endif
 #ifdef FEATURE_TP_SAMPLE
 //char cabc_dim_off[2]   ={0xf7, 0x25};
-char cabc_dim_off[2]   ={0xf7, 0x24};
+//char cabc_dim_off[2]   ={0xf7, 0x24};
+char cabc_dim[5]   ={0xf7, 0x00,0x00,0x3d, 0x00};  // 0x34
+//char mtp_2[4]      = {0xf7, 0x24,0x00,0x3d};
 #endif
+#endif
+
+#if defined(CONFIG_F_SKYDISP_CE_TUNING_M1) || defined(CONFIG_F_SKYDISP_CE_TUNING_M2)
+char ce_on[2]     = {0x88, 0x01}; 
+char ce_off[2]     = {0x88, 0x02}; 
+char eics[9]        = {0xb0, 0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+char cscs_case1_1[17]     = {0x8a, 0x0f,0x0f,0x0f,0x0f,0x0f,0x0f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case1_2[17]     = {0x8b, 0x01,0x21,0x43,0x65,0x87,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
+
+char cscs_case2_1[17]     = {0x8a, 0x1f,0x1f,0x1f,0x1f,0x1f,0x1f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case2_2[17]     = {0x8b, 0x01,0x21,0x43,0x65,0x87,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
+
+char cscs_case3_1[17]     = {0x8a, 0x3f,0x3f,0x3f,0x3f,0x3f,0x3f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case3_2[17]     = {0x8b, 0x01,0x21,0x43,0x65,0x87,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
+
+char cscs_case4_1[17]     = {0x8a, 0x0f,0x0f,0x0f,0x0f,0x0f,0x0f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case4_2[17]     = {0x8b, 0x41,0x55,0x66,0x77,0x88,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
+
+char cscs_case5_1[17]     = {0x8a, 0x1f,0x1f,0x1f,0x1f,0x1f,0x1f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case5_2[17]     = {0x8b, 0x41,0x55,0x66,0x77,0x88,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
+
+char cscs_case6_1[17]     = {0x8a, 0x3f,0x3f,0x3f,0x3f,0x3f,0x3f,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x06,0x00,0x00};
+char cscs_case6_2[17]     = {0x8b, 0x41,0x55,0x66,0x77,0x88,0x00,0x00,0x00,0x00,0x00,
+                             0x00,0x00,0x00,0x00,0x00,0x00};
 #endif
 
 static struct dsi_cmd_desc rohm_display_init_cmds[] = {
@@ -210,10 +244,14 @@ static struct dsi_cmd_desc rohm_display_init_cmds[] = {
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},
 #ifdef  FEATURE_ROHM_DUMMY_SCAN_OFF   
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(scanmode_off), scanmode_off},
-#endif    
-    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(mtp_1), mtp_1},
-    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(mtp_2), mtp_2}, 
+#endif        
+//    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(mtp_1), mtp_1},
+//    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(mtp_2), mtp_2}, 
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_dim), cabc_dim}, 
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(dfs_2), dfs_2}, 
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(Dot_work_change), Dot_work_change}, 
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(Dot_work_change_TR), Dot_work_change_TR},     
+#if (0) // kkcho_temp  ,20120524, This value need to 4.8'LCD.   
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_1), gcev_1},
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_2), gcev_2},
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_3), gcev_3}, 
@@ -221,6 +259,7 @@ static struct dsi_cmd_desc rohm_display_init_cmds[] = {
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_5), gcev_5},
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_6), gcev_6}, 
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(gcev_7), gcev_7} 
+#endif
 #else
     {DTYPE_DCS_WRITE, 1, 0, 0, 120, sizeof(sleep_out), sleep_out},
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},
@@ -269,6 +308,13 @@ static struct dsi_cmd_desc rohm_display_on_cmds[] = {
     {DTYPE_DCS_WRITE, 1, 0, 0, 0, sizeof(disp_on), disp_on}
 };
 
+#ifdef FEATURE_ROHM_BLACK_DATA_CMD
+static struct dsi_cmd_desc rohm_display_black_data_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 100, sizeof(drv_ctrl), drv_ctrl}
+};
+#endif
+
 static struct dsi_cmd_desc rohm_display_off_cmds[] = {
     {DTYPE_DCS_WRITE, 1, 0, 0, 0, sizeof(disp_off), disp_off},
     {DTYPE_DCS_WRITE, 1, 0, 0, 120, sizeof(sleep_in), sleep_in}
@@ -278,28 +324,76 @@ static struct dsi_cmd_desc rohm_display_off_cmds[] = {
 static struct dsi_cmd_desc rohm_display_cabc_on_cmds[] = {
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wdb), wdb},
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wctrld), wctrld},
-    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_on), cabc_on}
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_on), cabc_on},
 #ifdef  FEATURE_CABC_BL_MIN_SET
-   ,{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_min_val), cabc_min_val}
+   {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_min_val), cabc_min_val},
 #endif	
-   ,{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl}
-   ,{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_dim_off), cabc_dim_off}	
+   {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},
+   {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_dim), cabc_dim}	
 };
 
-#ifdef CONFIG_F_SKYDISP_CABC_FIX
+#ifdef CONFIG_F_SKYDISP_CABC_CTRL
 static struct dsi_cmd_desc rohm_display_cabc_off_cmds[] = {
-	{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wdb), wdb},
-    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wctrld), wctrld},
-	{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_off), cabc_off}
+     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wdb), wdb},
+     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wctrld), wctrld},
+     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_off), cabc_off}
 };
 #endif
 
 static struct dsi_cmd_desc rohm_display_cabc_bl_set_cmds[] = {
     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(wdb), wdb}
-#ifdef FEATURE_CABC_BL_MIN_SET 	
-   ,{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_min_val), cabc_min_val}
-#endif    
+//#ifdef FEATURE_CABC_BL_MIN_SET 	
+//	,{DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cabc_min_val), cabc_min_val}
+//#endif    
 };     
+#endif
+
+#if defined(CONFIG_F_SKYDISP_CE_TUNING_M1) || defined(CONFIG_F_SKYDISP_CE_TUNING_M2)
+#if (0) 
+static struct dsi_cmd_desc rohm_display_ce_on_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+};
+#endif
+static struct dsi_cmd_desc rohm_display_ce_off_cmds[] = {
+     {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_off), ce_off}
+};
+
+static struct dsi_cmd_desc rohm_display_ce_case1_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case1_1), cscs_case1_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case1_2), cscs_case1_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+};     
+static struct dsi_cmd_desc rohm_display_ce_case2_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case2_1), cscs_case2_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case2_2), cscs_case2_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+}; 
+static struct dsi_cmd_desc rohm_display_ce_case3_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case3_1), cscs_case3_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case3_2), cscs_case3_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+}; 
+static struct dsi_cmd_desc rohm_display_ce_case4_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case4_1), cscs_case4_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case4_2), cscs_case4_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+}; 
+static struct dsi_cmd_desc rohm_display_ce_case5_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case5_1), cscs_case5_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case5_2), cscs_case5_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+}; 
+static struct dsi_cmd_desc rohm_display_ce_case6_set_cmds[] = {
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(extcctl), extcctl},	
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case6_1), cscs_case6_1},
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(cscs_case6_2), cscs_case6_2},    
+    {DTYPE_DCS_LWRITE, 1, 0, 0, 0, sizeof(ce_on), ce_on}
+}; 
 #endif
 
 #ifdef FEATURE_ROHM_ID_READ
@@ -353,6 +447,17 @@ static uint32 mipi_rohm_otp_status(struct msm_fb_data_type *mfd)
 	return *lp;
 }
 #endif
+
+char bl_table[] = {0, 20, 30, 55, 70, 85, 100, 115, 130, 145, 160, 175, 190, 205, 220, 235, 255}; 
+
+void mipi_cabc_lcd_bl_init(int bl_level)
+{
+	if (bl_level >= 1 && bl_level <= 16) {
+		wdb[1] = bl_table[bl_level];
+		gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_HIGH_VALUE);
+	}
+}
+
 #ifdef FEATURE_ROHM_DUMMY_SCAN_OFF
 unsigned char is_read=FALSE;
 static char read_start [2] = {0xD0, 0x66}; 
@@ -368,7 +473,6 @@ static struct dsi_cmd_desc rohm_scan_dummy_start_cmds[] = {
 static struct dsi_cmd_desc rohm_scandummy_off_cmd = {
 	DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(scandummy), scandummy
 };
-
 
 static uint32 mipi_rohm_scan_dummy_off(struct msm_fb_data_type *mfd)
 {
@@ -387,27 +491,27 @@ static uint32 mipi_rohm_scan_dummy_off(struct msm_fb_data_type *mfd)
 	{
 		lp = ((uint8 *)rp->data++);
 		f2_reg = (*lp);
-   		pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
+   		//pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
 		
 		if(i==4)
 		{
-   		scanmode_off[1]=f2_reg;
-   		pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
+	   		scanmode_off[1]=f2_reg;
+	   		//pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
 		}
 		else if(i==5)
 		{
-   		scanmode_off[2]=f2_reg;
-   		pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
+   			scanmode_off[2]=f2_reg;
+   			//pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
 		}
 	       else if(i==6)
 		{
-   		scanmode_off[3]=f2_reg;
-   		pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
+   			scanmode_off[3]=f2_reg;
+   			//pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
 		}
 		else if(i==7)
 		{
-   		scanmode_off[4]=f2_reg;
-   		pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
+   			scanmode_off[4]=f2_reg;
+   			//pr_info("%s: scanmode_off=0x%x\n", __func__, *lp);
 		}
 
 	}
@@ -419,10 +523,9 @@ void read_scan_dummy_off(void)
 	
 	for(i=0;i<6;i++)
 	{
-			printk("scanmode_off[index : %d]=0x%x \n",i,scanmode_off[i]);
+			pr_info("scanmode_off[index : %d]=0x%x \n",i,scanmode_off[i]);
 	}
 }
-
 #endif
 
 #if 0
@@ -444,6 +547,7 @@ static uint32 mipi_rohm_brightness(struct msm_fb_data_type *mfd)
 	return *lp;
 }
 #endif
+
 /*
  0. rohm_display_init_cmds
  1. rohm_display_veil_init0_cmds
@@ -454,27 +558,137 @@ static uint32 mipi_rohm_brightness(struct msm_fb_data_type *mfd)
  6. rohm_display_veil_init2_cmds
  7. dsi_cmd_desc rohm_display_on_cmds
  */
-#ifdef CONFIG_F_SKYDISP_CABC_FIX
-void cabc_contol(struct msm_fb_data_type *mfd, int state)
+#ifdef CONFIG_F_SKYDISP_CABC_CTRL
+void cabc_control(struct msm_fb_data_type *mfd, int state)
 {
-	mutex_lock(&bl_mutex);
+	ENTER_FUNC2();
+	mutex_lock(&rohm_state.lcd_mutex);
 	mipi_set_tx_power_mode(0);
-
-	if(state == true){
-		
+	wdb[1] = bl_table[mfd->bl_level];
+	if (state >= 1) {
 		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_off_cmds,
-								ARRAY_SIZE(rohm_display_cabc_off_cmds));
-		rohm_state.acl_flag = true;
-	}
-	else{ 
+				ARRAY_SIZE(rohm_display_cabc_off_cmds));
+	} else { 
 		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
-							ARRAY_SIZE(rohm_display_cabc_on_cmds));
-		rohm_state.acl_flag = false;
+				ARRAY_SIZE(rohm_display_cabc_on_cmds));
 	}
+	rohm_state.acl_flag = state;
 	mipi_set_tx_power_mode(1);	
-	mutex_unlock(&bl_mutex);
-	
-	printk(KERN_WARNING"mipi_sharp CABC = %d\n",state);
+	mutex_unlock(&rohm_state.lcd_mutex);		
+	printk(KERN_WARNING "mipi_sharp CABC = %d\n", state);
+}
+#endif
+
+#if defined(CONFIG_F_SKYDISP_CE_TUNING_M1) || defined(CONFIG_F_SKYDISP_CE_TUNING_M2)
+unsigned int ce_case_state = 0;
+#endif
+#ifdef CONFIG_F_SKYDISP_CE_TUNING_M1
+void SKY_LCD_CE_CASE_SET(struct msm_fb_data_type *mfd, uint32_t CEcase)
+{
+    	ENTER_FUNC2();
+
+	ce_case_state = CEcase;  	
+
+	mutex_lock(&rohm_state.lcd_mutex);		
+	mipi_set_tx_power_mode(0);
+	switch(CEcase) {
+		case 0:  //default
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_off_cmds,
+									ARRAY_SIZE(rohm_display_ce_off_cmds));
+			break;
+		case 1:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case1_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case1_set_cmds));
+			break;
+		case 2:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case2_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case2_set_cmds));
+			break;
+		case 3:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case3_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case3_set_cmds));
+			break;
+		case 4:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case4_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case4_set_cmds));
+			break;
+		case 5:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case5_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case5_set_cmds));
+			break;
+		case 6:  
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case6_set_cmds,
+									ARRAY_SIZE(rohm_display_ce_case6_set_cmds));
+			break;		
+		default:
+			break;			
+	}
+	mipi_set_tx_power_mode(1);
+	mutex_unlock(&rohm_state.lcd_mutex);	
+}
+
+uint32_t SKY_LCD_CE_CASE_GET(void)
+{
+	printk(KERN_INFO "[SKY_LCD] SKY_LCD_CE_CASE_GET : %d\n", ce_case_state);
+	return ce_case_state;	   	
+}
+
+EXPORT_SYMBOL(SKY_LCD_CE_CASE_SET);
+EXPORT_SYMBOL(SKY_LCD_CE_CASE_GET);
+#endif
+
+#ifdef CONFIG_F_SKYDISP_CE_TUNING_M2
+static int ce_control_skip_during_bootup =0;
+void ce_control(struct msm_fb_data_type *mfd, int count)
+{
+	if(ce_control_skip_during_bootup)
+	{
+		mutex_lock(&rohm_state.lcd_mutex);		
+		mipi_set_tx_power_mode(0);
+		ce_case_state = count; 
+		switch(count) {
+			case 0:  //default
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case2_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case2_set_cmds));
+				break;
+			case 1:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case1_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case1_set_cmds));
+				break;
+			case 2:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case2_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case2_set_cmds));
+				break;
+			case 3:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case3_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case3_set_cmds));
+				break;
+			case 4:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case4_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case4_set_cmds));
+				break;
+			case 5:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case5_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case5_set_cmds));
+				break;
+			case 6:  
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case6_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case6_set_cmds));
+				break;		
+			case 7:  // CE_OFF 
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_off_cmds,
+										ARRAY_SIZE(rohm_display_ce_off_cmds));
+				break;			
+			default:
+					mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case2_set_cmds,
+										ARRAY_SIZE(rohm_display_ce_case2_set_cmds));
+				break;			
+		}
+		mipi_set_tx_power_mode(1);
+		mutex_unlock(&rohm_state.lcd_mutex);
+	}
+	ce_control_skip_during_bootup =1;
+	printk(KERN_WARNING"mipi_sharp CE = %d\n",count);
 }
 #endif
 
@@ -482,21 +696,7 @@ static int mipi_rohm_lcd_on(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd;
 
-   // ENTER_FUNC2();
-
-#ifdef CONFIG_F_SKYDISP_SILENT_BOOT //silent boot p13832@shji
-	if(sky_sys_rst_is_silent_boot_mode() && first_on) {
-		if(sky_sys_rst_is_backlight_off() == 0) {
-			printk("[%s] System Reboot!!! Backlight is Off state! Reboot Silently!!\n", __func__);
-			first_on = 0;
-			printk("[%s] sky_sys_rst_is_silent_boot_backlight FALSE\n", __func__);
-			sky_sys_rst_is_silent_boot_backlight(FALSE);
-			return 0;
-		}
-	}
-	first_on = 0;
-	//disable_bl = 0;
-#endif
+	ENTER_FUNC2();
 
 	mfd = platform_get_drvdata(pdev);
 
@@ -505,73 +705,128 @@ static int mipi_rohm_lcd_on(struct platform_device *pdev)
 	if (mfd->key != MFD_KEY)
 		return -EINVAL;
 
-	mutex_lock(&bl_mutex);
-	
+	mutex_lock(&rohm_state.lcd_mutex);	
 	if (rohm_state.disp_initialized == false) {
-		//PRINT("[LIVED] LCD RESET!!\n");
-     //      	gpio_set_value_cansleep(gpio43, GPIO_LOW_VALUE); 
-       //    	msleep(10);
-	//	gpio_set_value_cansleep(gpio43, GPIO_HIGH_VALUE);
-	//	msleep(10);
-		
-#ifdef FEATURE_ROHM_DUMMY_SCAN_OFF
-if(!is_read)
-{
-	mipi_dsi_cmd_bta_sw_trigger(); 
-	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_scan_dummy_start_cmds,
-			ARRAY_SIZE(rohm_scan_dummy_start_cmds));
-	mipi_rohm_scan_dummy_off(mfd);
-	is_read = TRUE;
-}	
+		/*20120625, kkcho, Must be the preservation of order : reset->vci*/
+		gpio_set_value_cansleep(gpio_lcd_mipi_reset, GPIO_LOW_VALUE); 
+		msleep(10);
+		gpio_set_value_cansleep(gpio_lcd_mipi_reset, GPIO_HIGH_VALUE);
+		msleep(10);
+#ifdef SKY_LCD_VCI_EN_PIN_CHANGE 
+		gpio_set_value(LCD_VCI_EN, GPIO_HIGH_VALUE);
+		msleep(10);
+#else
+		gpio_set_value_cansleep(gpio_lcd_vci_en, 1);
 #endif
-		
-		mipi_dsi_cmds_tx( &rohm_tx_buf, rohm_display_init_cmds,
+#ifdef FEATURE_ROHM_DUMMY_SCAN_OFF
+		if(!is_read)
+		{
+			mipi_dsi_cmd_bta_sw_trigger(); 
+			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_scan_dummy_start_cmds,
+					ARRAY_SIZE(rohm_scan_dummy_start_cmds));
+			mipi_rohm_scan_dummy_off(mfd);
+			is_read = TRUE;
+		}	
+#endif
+
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_init_cmds,
 				ARRAY_SIZE(rohm_display_init_cmds));
 		rohm_state.disp_initialized = true;
 	}
+#if defined(CONFIG_F_SKYDISP_CE_TUNING_M1) || defined(CONFIG_F_SKYDISP_CE_TUNING_M2)
+	switch(ce_case_state) {
+	case 0:  //default
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_off_cmds,
+				ARRAY_SIZE(rohm_display_ce_off_cmds));
+		break;
+	case 1:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case1_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case1_set_cmds));
+		break;
+	case 2:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case2_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case2_set_cmds));
+		break;
+	case 3:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case3_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case3_set_cmds));
+		break;
+	case 4:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case4_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case4_set_cmds));
+		break;
+	case 5:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case5_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case5_set_cmds));
+		break;
+	case 6:  
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_case6_set_cmds,
+				ARRAY_SIZE(rohm_display_ce_case6_set_cmds));
+		break;		
+	case 7:  // CE_OFF 
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_off_cmds,
+				ARRAY_SIZE(rohm_display_ce_off_cmds));
+		break;				
+	default:
+		break;			
+	}
+#else	
+	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_ce_off_cmds,
+			ARRAY_SIZE(rohm_display_ce_off_cmds));
+#endif
 
-	
 	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_on_cmds,
 			ARRAY_SIZE(rohm_display_on_cmds));
-      rohm_state.disp_on = true;
+	rohm_state.disp_on = true;
 
 #ifdef FEATURE_ROHM_CABC_ON
-#ifdef CONFIG_F_SKYDISP_CABC_FIX
-	if(rohm_state.acl_flag == true){
-		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_off_cmds,
-									ARRAY_SIZE(rohm_display_cabc_off_cmds));
-
-	}
-	else{ 
-	
-	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
-			ARRAY_SIZE(rohm_display_cabc_on_cmds));
-	}
+#ifdef CONFIG_F_SKYDISP_CHANGE_BL_TABLE_WHEN_OFFLINE_CHARGING
+	// doesn't turn on CABC when offline charging
+	if(is_offline_charging_mode == 0)
 #else
-				
-	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
-				ARRAY_SIZE(rohm_display_cabc_on_cmds));
+		if(1)
+#endif
+		{
+#ifdef CONFIG_F_SKYDISP_CABC_CTRL
+			if(rohm_state.acl_flag == true){
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_off_cmds,
+						ARRAY_SIZE(rohm_display_cabc_off_cmds));
+			}
+			else{ 	
+				mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
+						ARRAY_SIZE(rohm_display_cabc_on_cmds));
+			}
+#else				
+			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
+					ARRAY_SIZE(rohm_display_cabc_on_cmds));
+#endif
+		}
+#ifdef CONFIG_F_SKYDISP_CHANGE_BL_TABLE_WHEN_OFFLINE_CHARGING
+		else
+		{
+			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_off_cmds,
+					ARRAY_SIZE(rohm_display_cabc_off_cmds));
+		}
 #endif
 #endif
-
 
 #ifdef FEATURE_ROHM_ID_READ
-//mipi_set_tx_power_mode(0);
-mipi_dsi_cmd_bta_sw_trigger(); 
-mipi_rohm_manufacture_id(mfd);
-mipi_rohm_otp_status(mfd);
-//mipi_set_tx_power_mode(1);
+	mipi_set_tx_power_mode(0);
+	mipi_dsi_cmd_bta_sw_trigger(); 
+	mipi_rohm_manufacture_id(mfd);
+	mipi_rohm_otp_status(mfd);
+	mipi_set_tx_power_mode(1);
 #endif
-
 #ifdef FEATURE_ROHM_DUMMY_SCAN_OFF
-      read_scan_dummy_off();
+	//read_scan_dummy_off();
 #endif
+	mutex_unlock(&rohm_state.lcd_mutex);
 
-        mutex_unlock(&bl_mutex);
-
-#ifdef CONFIG_F_SKYDISP_SILENT_BOOT //silent boot p13832@shji
-		printk("[%s] sky_sys_rst_is_silent_boot_backlight TRUE\n", __func__);
-	    	sky_sys_rst_is_silent_boot_backlight(TRUE);
+#ifdef CONFIG_F_SKYDISP_SILENT_BOOT
+	// In case of reset when silentboot mode(doing boot), only when is_silent_boot_mode_n_bl_off == 0, do it.
+	// If always do it, display silentboot image eventhough reset occur when backlight off.
+	if(is_silent_boot_mode_n_bl_off == 0)
+		pantech_sys_reset_backlight_flag_set(true);
 #endif
 
 	EXIT_FUNC2();
@@ -582,7 +837,7 @@ static int mipi_rohm_lcd_off(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd;
 
-   // ENTER_FUNC2();
+	ENTER_FUNC2();
 
 	mfd = platform_get_drvdata(pdev);
 
@@ -592,512 +847,250 @@ static int mipi_rohm_lcd_off(struct platform_device *pdev)
 		return -EINVAL;
 
 	if (rohm_state.disp_on == true) {
-		//gpio_set_value_cansleep(gpio43, GPIO_LOW_VALUE);
+		//gpio_set_value_cansleep(gpio_lcd_mipi_reset, GPIO_LOW_VALUE);
 		//msleep(5);
-		//gpio_set_value_cansleep(gpio43, GPIO_HIGH_VALUE);
+		//gpio_set_value_cansleep(gpio_lcd_mipi_reset, GPIO_HIGH_VALUE);
 		//msleep(5);
+		mutex_lock(&rohm_state.lcd_mutex);
+		mipi_set_tx_power_mode(0);
 
-		mutex_lock(&bl_mutex);
-              mipi_set_tx_power_mode(0);
-		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_off_cmds,
-				ARRAY_SIZE(rohm_display_off_cmds));
+#if (0) //def FEATURE_ROHM_BLACK_DATA_CMD
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_black_data_cmds,	ARRAY_SIZE(rohm_display_black_data_cmds));
+#endif
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_off_cmds,	ARRAY_SIZE(rohm_display_off_cmds));
 		rohm_state.disp_on = false;
 		rohm_state.disp_initialized = false;
-             mipi_set_tx_power_mode(1);	
-		mutex_unlock(&bl_mutex);	 
-	}
-	
-#ifdef CONFIG_F_SKYDISP_SILENT_BOOT //silent boot p13832@shji
-		printk("[%s] sky_sys_rst_is_silent_boot_backlight FALSE\n", __func__);
-	    	sky_sys_rst_is_silent_boot_backlight(FALSE);
+		mipi_set_tx_power_mode(1);	
+		mutex_unlock(&rohm_state.lcd_mutex);
+
+#ifdef CONFIG_F_SKYDISP_SILENT_BOOT
+		pantech_sys_reset_backlight_flag_set(false);
+		is_silent_boot_mode_n_bl_off = 0;
 #endif
-       EXIT_FUNC2();
+	}
+
+	EXIT_FUNC2();
 	return 0;
 }
 
-
-#if defined  FEATURE_SKY_BACKLIGHT_TPS61161 ||  defined FEATURE_ROHM_CABC_ON
+#if defined FEATURE_ROHM_CABC_ON
 #ifndef FEATURE_RENESAS_BL_CTRL_CHG
 static int first_enable = 0;
 #endif
 static int prev_bl_level = 0;
 #endif
+#ifdef FEATURE_LOW_LEVEL_CABC_OFF
+static int low_level_cabc_off=0;
+#define CABC_ON 1
+#define CABC_OFF  0
+static int low_level_cabc_ctrl(int on)
+{
 
+	struct msm_fb_data_type *mfd;
+	struct fb_info *info; 
+	//static int prev_on;
+
+	info = registered_fb[0];
+	mfd = (struct msm_fb_data_type *)info->par;
+
+	//if(on == prev_on)
+		//return 0;
+
+	if(on)
+	{
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_on_cmds,
+							ARRAY_SIZE(rohm_display_cabc_on_cmds));	
+		//printk("[SKY_LCD]********* cabc_on \n");
+	}
+	else
+	{
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_off_cmds,
+								ARRAY_SIZE(rohm_display_cabc_off_cmds));		
+		//printk("[SKY_LCD]********* cabc_off \n");
+	}
+	
+	//prev_on = on;
+	return 0;
+}
+#endif
 static void mipi_rohm_set_backlight(struct msm_fb_data_type *mfd)
 {
-#if defined (FEATURE_SKY_BACKLIGHT_TPS61161)
-	int idx;
-	unsigned long flags;
 	int bl_level;
 
-	bl_level = mfd->bl_level | 0x00;
+#ifdef CONFIG_F_SKYDISP_SKIP_BLSET_WITH_EFS_ERASE
+	mfd->bl_set_first_skip =0;
+#endif
 
-	printk("mipi_rohm_set_backlight bl_level =%d, first_enable =%d, prev_bl_level =%d\n",bl_level, first_enable, prev_bl_level);
-
-	if (prev_bl_level == 0) {
-		mdelay(200);
-	}
-
-	if (bl_level == 0) {
-		gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-        gpio_set_value_cansleep(gpio16, GPIO_LOW_VALUE);
-		mdelay(T_SHUTDOWN); 
-		first_enable =0;
-	} else {
-		if (first_enable == 0) {          
-            gpio_set_value_cansleep(gpio16, GPIO_HIGH_VALUE);   
-			local_save_flags(flags);
-			local_irq_disable();
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			udelay(T_ES_DELAY); 
-			gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-			udelay(T_ES_DETECT);
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			mdelay(T_ES_WIN); 
-
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			udelay(T_START);
-			for (idx=0; idx<NUM_ADDR_DIGIT; idx++) {
-				uint8 bit = ((DEVICE_ADDR << idx) >>(NUM_ADDR_DIGIT-1)) & 0x01 ;
-
-				if (bit == 1) {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_HB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_HB);  
-				} else {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_LB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_LB);  
-
-				}
-			}
-			gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-			udelay(T_EOS);
-
-			// 5bit Data
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			udelay(T_START);
-
-			for (idx=0; idx<NUM_DATA_DIGIT; idx++) {                          
-				uint8 bit = (( bl_level<< idx) >>(NUM_DATA_DIGIT-1)) & 0x01 ;
-				if (bit == 1) {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_HB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_HB);  
-				} else {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_LB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_LB);  
-
-				}
-			}
-			gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-			udelay(T_EOS);
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			
-			local_irq_restore(flags);
-			first_enable = 1;
-		} else {
-
-			//8bit device Address
-			local_save_flags(flags);
-			local_irq_disable();
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			udelay(T_START);
-			for (idx=0; idx<NUM_ADDR_DIGIT; idx++) {
-				uint8 bit = ((DEVICE_ADDR << idx) >>(NUM_ADDR_DIGIT-1)) & 0x01 ;
-
-				if (bit == 1) {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_HB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_HB);  
-				} else {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_LB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_LB);  
-
-				}
-			}
-			gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-			udelay(T_EOS);
-
-			// 5bit Data
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			udelay(T_START);
-
-			for (idx=0; idx<NUM_DATA_DIGIT; idx++) {                          
-				uint8 bit = (( bl_level<< idx) >>(NUM_DATA_DIGIT-1)) & 0x01 ;
-				if (bit == 1) {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_HB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_HB);  
-				} else {
-					gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE); 
-					udelay(T_LOW_LB);
-					gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE); 
-					udelay(T_HIGH_LB);  
-
-				}
-			}
-			gpio_set_value_cansleep(gpio24, GPIO_LOW_VALUE);
-			udelay(T_EOS);
-			gpio_set_value_cansleep(gpio24, GPIO_HIGH_VALUE);
-			local_irq_restore(flags);
-		}            
-	}
-
-	prev_bl_level = bl_level;
-#elif defined (FEATURE_ROHM_CABC_ON)
-#if 0
-int bl_level;
-
+#ifndef FEATURE_RENESAS_BL_CTRL_CHG
 	if (prev_bl_level == mfd->bl_level)
 		return;
-
-    ENTER_FUNC2();
-
-    bl_level = (mfd->bl_level *255)/16;
-#ifdef FEATURE_CABC_BL_MIN_SET
-{
-int bl_min;
-
-   bl_min  = (bl_level *4)/10;  //60%
-  // bl_min  = (bl_level *7)/10;  //30%	
-  // bl_min  = (bl_level *9)/10;  //10%
-     cabc_min_val[1] = bl_min;
-    printk(KERN_ERR"mipi_rohm_set_backlight bl_min =%d \n",bl_min);
-}
-#endif 
-
-    wdb[1] = bl_level;
-    printk(KERN_ERR"mipi_rohm_set_backlight bl_level =%d \n",bl_level);
-	
-    if(first_enable == 0)
-    {
-        gpio_set_value_cansleep(gpio16, GPIO_HIGH_VALUE);
-        first_enable  = 1;
-        
-    }
-	
-    mipi_set_tx_power_mode(0);
-    mutex_lock(&mfd->dma->ov_mutex);
-	if(charger_flag == 1 && bl_level > 0){
-
-			mipi_dsi_cmds_tx(mfd, &rohm_tx_buf, rohm_display_on_cmds,
-					ARRAY_SIZE(rohm_display_on_cmds));
-	}
-	
-    mipi_dsi_cmds_tx(mfd, &rohm_tx_buf, rohm_display_cabc_bl_set_cmds,
-			ARRAY_SIZE(rohm_display_cabc_bl_set_cmds));
-	
-	if(charger_flag == 1 && bl_level == 0){
-			mipi_dsi_cmds_tx(mfd, &rohm_tx_buf, rohm_display_off_cmds,
-					ARRAY_SIZE(rohm_display_off_cmds));
-	}
-    mutex_unlock(&mfd->dma->ov_mutex);
-	
-    prev_bl_level = mfd->bl_level;
-    mipi_set_tx_power_mode(1);
-	
-    if(bl_level == 0)
-    {
-          gpio_set_value_cansleep(gpio16, GPIO_LOW_VALUE);
-          first_enable = 0;
-    }
-#else
-int bl_level;
-
-
-//	if (prev_bl_level == mfd->bl_level)
-//		return;
-
-    //ENTER_FUNC2();
-	
-    bl_level = mfd->bl_level;	
-    printk(KERN_ERR"mipi_rohm_set_backlight bl_level =%d \n",bl_level);
-	
-switch(bl_level){
-#if 0   //at&t 230cd
-case 16:
-	wdb[1] = 176;
-	break;
-case 15:
-	wdb[1] = 165;
-	break;
-case 14:
-	wdb[1] = 154;
-	break;
-case 13:
-	wdb[1] = 143;
-	break;
-case 12:
-	wdb[1] = 132;
-	break;
-case 11:
-	wdb[1] = 121;
-	break;
-case 10:
-	wdb[1] = 110;
-	break;
-case 9:
-	wdb[1] = 99;
-	printk("[PANTECH_LCD:%s]Default Setting Android Brightness Test\n",__func__);
-	break;
-case 8:
-	wdb[1] = 88;
-	break;
-case 7:
-	wdb[1] = 77;
-	break;
-case 6:
-	wdb[1] = 66;
-//	wdb[1] = 99;
-	break;
-case 5:
-	wdb[1] = 55;
-	break;
-case 4:
-	wdb[1] = 44;
-	break;
-case 3:
-	wdb[1] = 33;
-	break;
-case 2:
-	wdb[1] = 22;
-	break;
-case 1:
-	wdb[1] = 11;
-	break;
-#else    // ef47s
-#if 1  //p12281 2013.07.03 16 level
-case 16:
-//	wdb[1] = 255;
-	wdb[1] = 255;
-	break;
-case 15:
-//	wdb[1] = 242;
-	wdb[1] = 247;
-	break;
-case 14:
-     //   wdb[1] = 230;
-        wdb[1] = 230;
-        break;
-case 13:
-//        wdb[1] = 216;
-        wdb[1] = 213;
-        break;
-case 12:
-//        wdb[1] = 204;
-        wdb[1] = 196;
-        break;
-case 11:
- //       wdb[1] = 191;
-        wdb[1] = 179;
-        break;
-case 10:
- //       wdb[1] = 178;
-        wdb[1] = 162;
-        break;
-case 9:
- //       wdb[1] = 165;
-        wdb[1] = 145;
-        break;
-case 8:
-  //      wdb[1] = 152;
-        wdb[1] = 128;
-        break;
-case 7:
-//        wdb[1] = 140;
-//        wdb[1] = 111;
-        wdb[1] = 100;
-        break;
-case 6:
-//        wdb[1] = 125;
-        wdb[1] = 94;
-        break;
-case 5:
- //       wdb[1] = 113;
-        wdb[1] = 77;
-        break;
-case 4:
-//        wdb[1] = 100;
-        wdb[1] = 60;
-        break;
-case 3:
-//        wdb[1] = 88;
-        wdb[1] = 43;
-        break;
-case 2:
- //       wdb[1] = 76;
-        wdb[1] = 26;
-        break;
-case 1:
-       // wdb[1] = 63;
-//        wdb[1] = 9;
-        wdb[1] = 10;
-        break;
-#else
-case 31:
-	wdb[1] = 255; 
-	break;
-case 30:
-	wdb[1] = 251; 
-	break;
-case 29:
-	wdb[1] = 247; 
-	break;
-case 28:
-	wdb[1] = 238; 
-	break;
-case 27:
-	wdb[1] = 230; 
-	break;
-case 26:
-	wdb[1] = 221; 
-	break;
-case 25:
-	wdb[1] = 213; 
-	break;
-case 24:
-	wdb[1] = 204; 
-	break;
-case 23:
-	wdb[1] = 196; 
-	break;
-case 22:
-	wdb[1] = 188; 
-	break;
-case 21:
-	wdb[1] = 179; 
-	break;
-case 20:
-	wdb[1] = 170; 
-	break;
-case 19:
-	wdb[1] = 162; 
-	break;
-case 18:
-	wdb[1] = 153; 
-	break;
-case 17:
-	wdb[1] = 145; 
-	break;
-case 16:
-	wdb[1] = 136; 
-	break;
-case 15:
-	wdb[1] = 128; 
-	break;
-case 14:
-	wdb[1] = 114; 
-	break;
-case 13:
-	wdb[1] = 100; 
-	break;
-case 12:
-	wdb[1] = 97; 
-	break;
-case 11:
-	wdb[1] = 94; 
-	break;
-case 10:
-	wdb[1] = 85;
-	break;
-case 9:
-	wdb[1] = 77;
-	break;
-case 8:
-	wdb[1] = 68;
-	break;
-case 7:
-	wdb[1] = 60;
-	break;
-case 6:
-	wdb[1] = 51;
-	break;
-case 5:
-	wdb[1] = 43;
-	break;
-case 4:
-	wdb[1] = 34;
-	break;
-case 3:
-	wdb[1] = 26;
-	break;
-case 2:
-	wdb[1] = 18;
-	break;
-case 1:
-	wdb[1] = 10;
-	break;
 #endif
+
+	//ENTER_FUNC2();
+
+	if (mfd->bl_level == 0) {
+		bl_level = 1;
+	} else {
+        bl_level = mfd->bl_level;
+	}
+	printk(KERN_INFO"mipi_rohm_set_backlight bl_level =%d \n",bl_level);
+
+#ifdef CONFIG_F_SKYDISP_SILENT_BOOT
+    if(is_silent_boot_mode_n_bl_off == 1)
+    {
+        printk(KERN_ERR"DONOT set backlight because this time is silentboot mode.\n");
+        return;
+    }
 #endif
-case 0:
-	wdb[1] = 0;
-	break;	
-}
+
+	if (bl_level >= 0 && bl_level <= 16) {
+		wdb[1] = bl_table[bl_level];
+	}
+
+#ifdef CONFIG_F_SKYDISP_CHANGE_BL_TABLE_WHEN_OFFLINE_CHARGING
+    if(is_offline_charging_mode == 1) {
+		if (bl_level == 16)
+			wdb[1] = 255;
+		else
+			wdb[1] = bl_level * 16;
+		printk("It's offline_charging_mode : brightness is %d\n", wdb[1]);
+    }
+#endif
 
 #ifdef FEATURE_RENESAS_BL_CTRL_CHG
-	if(!gpio_get_value_cansleep(gpio16))
-		gpio_set_value_cansleep(gpio16, GPIO_HIGH_VALUE);
+	if(!gpio_get_value_cansleep(gpio_lcd_bl_en))
+		gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_HIGH_VALUE);
 #else
-    if(first_enable == 0)
-    {
-        gpio_set_value_cansleep(gpio16, GPIO_HIGH_VALUE);
-        first_enable  = 1;  
-    }
+	if(first_enable == 0)
+	{
+	    gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_HIGH_VALUE);
+	    first_enable  = 1;  
+	}
 #endif	
 	
-    mutex_lock(&bl_mutex);
-    mipi_set_tx_power_mode(0);
-
-	if(off_charger_flag == 1 && bl_level > 0){
-
-			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_init_cmds,
-					ARRAY_SIZE(rohm_display_init_cmds));
-			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_on_cmds,
-					ARRAY_SIZE(rohm_display_on_cmds));
-	}
-
-    mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_bl_set_cmds,
+	mutex_lock(&rohm_state.lcd_mutex);		
+	mipi_set_tx_power_mode(0);
+	mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_cabc_bl_set_cmds,
 			ARRAY_SIZE(rohm_display_cabc_bl_set_cmds));
-
-
-	if(off_charger_flag == 1 && bl_level == 0){
-			mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_off_cmds,
-					ARRAY_SIZE(rohm_display_off_cmds));
+	if (mfd->bl_level == 0) {
+		prev_bl_level = 1;
+	} else {
+		prev_bl_level = mfd->bl_level;	
 	}
 
-    mipi_set_tx_power_mode(1);
-    mutex_unlock(&bl_mutex);
-	
-    prev_bl_level = mfd->bl_level;
-
-    if(bl_level == 0)
-    {
-#ifdef FEATURE_RENESAS_BL_CTRL_CHG	
-	    if(gpio_get_value_cansleep(gpio16))
-		    gpio_set_value_cansleep(gpio16, GPIO_LOW_VALUE);
-#else
-          gpio_set_value_cansleep(gpio16, GPIO_LOW_VALUE);
-          first_enable = 0;
-#endif	
-    }	
-	
-	
+#ifdef FEATURE_LOW_LEVEL_CABC_OFF
+	if(!rohm_state.acl_flag) // UI_set is cabc_on
+	{
+		if((bl_level >=1) && (bl_level <= 4))
+		{
+			low_level_cabc_ctrl(CABC_OFF);	
+			low_level_cabc_off = true;
+		}		
+		else
+		{
+			if (low_level_cabc_off)
+			{
+				low_level_cabc_ctrl(CABC_ON);		
+				low_level_cabc_off = false;
+			}		
+		}
+	}
 #endif
-    //EXIT_FUNC2();
-#endif /*FEATURE_SKY_BACKLIGHT_TPS61165*/
-    
+	//mipi_set_tx_power_mode(1);
+	//mutex_unlock(&rohm_state.lcd_mutex);	
+	
+	if(bl_level == 0)
+	{
+#ifdef FEATURE_RENESAS_BL_CTRL_CHG
+		if(gpio_get_value_cansleep(gpio_lcd_bl_en))
+			gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_LOW_VALUE);
+#else
+	      gpio_set_value_cansleep(gpio_lcd_bl_en, GPIO_LOW_VALUE);
+	      first_enable = 0;
+#endif		  
+#ifdef FEATURE_ROHM_BLACK_DATA_CMD
+		//printk("kkcho********* black_cmd_on\n");
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_black_data_cmds,	ARRAY_SIZE(rohm_display_black_data_cmds));
+#endif		  		  
+	}
+
+	mipi_set_tx_power_mode(1);
+	mutex_unlock(&rohm_state.lcd_mutex);	
+
+#ifdef CONFIG_F_PREVENT_RESET_DURING_BOOTUP
+	mfd->backlight_on_after_bootup =1;	
+#endif
+
+	//EXIT_FUNC2();    
 }
 
+#if (0) //def CONFIG_F_SKYDISP_LCD_SHUTDOWN
+extern void mipi_dsi_panel_power_shutdown(void);
+static void mipi_rohm_lcd_shutdown(struct platform_device *pdev)
+{
+	struct msm_fb_data_type *mfd;
+
+	//ENTER_FUNC2();
+
+	mfd = platform_get_drvdata(pdev);
+
+	//if (rohm_state.disp_on == true) 
+	{
+		mutex_lock(&rohm_state.lcd_mutex);
+		//mipi_set_tx_power_mode(0);
+
+#ifdef FEATURE_ROHM_BLACK_DATA_CMD
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_black_data_cmds,	ARRAY_SIZE(rohm_display_black_data_cmds));
+#endif
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_off_cmds,	ARRAY_SIZE(rohm_display_off_cmds));
+		rohm_state.disp_on = false;
+		rohm_state.disp_initialized = false;
+		//mipi_set_tx_power_mode(1);	
+		mutex_unlock(&rohm_state.lcd_mutex);
+		mipi_dsi_panel_power_shutdown();
+	}
+	
+       //EXIT_FUNC2();
+}
+#endif
+
+#ifdef CONFIG_F_SKYDISP_SHARP_LCD_FLICKER
+extern void mipi_dsi_panel_power_shutdown(void);
+void pantech_mipi_lcd_shutdown(void)
+{
+	struct msm_fb_data_type *mfd;
+	struct fb_info *info; 
+
+	//ENTER_FUNC2();
+
+	info = registered_fb[0];
+	mfd = (struct msm_fb_data_type *)info->par;
+
+	{
+		mutex_lock(&rohm_state.lcd_mutex);
+		mipi_set_tx_power_mode(0);
+#ifdef FEATURE_ROHM_BLACK_DATA_CMD
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_black_data_cmds,	ARRAY_SIZE(rohm_display_black_data_cmds));
+#endif
+		mipi_dsi_cmds_tx(&rohm_tx_buf, rohm_display_off_cmds,	ARRAY_SIZE(rohm_display_off_cmds));
+		rohm_state.disp_on = false;
+		rohm_state.disp_initialized = false;
+		mipi_set_tx_power_mode(1);	
+		mutex_unlock(&rohm_state.lcd_mutex);
+		mipi_dsi_panel_power_shutdown();
+	}	
+       //EXIT_FUNC2();
+}
+
+#if 0
+extern void mipi_dsi_panel_power_suspend_L11285v(void);
+static int mipi_rohm_lcd_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	mipi_dsi_panel_power_suspend_L11285v();
+	return 0;
+}
+#endif
+#endif
 
 static int __devinit mipi_rohm_lcd_probe(struct platform_device *pdev)
 {
@@ -1105,7 +1098,7 @@ static int __devinit mipi_rohm_lcd_probe(struct platform_device *pdev)
         mipi_rohm_pdata = pdev->dev.platform_data;
 		return 0;
 	}
-
+       mutex_init(&rohm_state.lcd_mutex);
 	msm_fb_add_device(pdev);
 
 	return 0;
@@ -1169,11 +1162,28 @@ static int __init mipi_rohm_lcd_init(void)
 {
     ENTER_FUNC2();
 
+#ifdef CONFIG_F_SKYDISP_CHANGE_BL_TABLE_WHEN_OFFLINE_CHARGING
+    is_offline_charging_mode = pantech_charging_status();
+    printk("is_offline_charging_mode : %d\n", is_offline_charging_mode);
+#endif
+
+#ifdef CONFIG_F_SKYDISP_SILENT_BOOT
+    is_silent_boot_mode = pantech_sys_rst_is_silent_boot_mode(); 
+    is_backlight_on_before_reset = pantech_sys_reset_backlight_flag_get();	
+    
+    if(is_silent_boot_mode == 1 && is_backlight_on_before_reset == 0)
+    {
+        printk("This time is silent boot mode.\n");
+        is_silent_boot_mode_n_bl_off = 1;
+    }
+    else
+        printk("This time is NOT silent boot mode.\n");
+#endif        
+
     rohm_state.disp_powered_up = true;
 
     mipi_dsi_buf_alloc(&rohm_tx_buf, DSI_BUF_SIZE);
     mipi_dsi_buf_alloc(&rohm_rx_buf, DSI_BUF_SIZE);
-    mutex_init(&bl_mutex);
 
     EXIT_FUNC2();
 

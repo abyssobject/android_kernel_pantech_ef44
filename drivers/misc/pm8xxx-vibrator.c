@@ -53,6 +53,8 @@
 #define VIB_MAX_LEVEL_mV	3100
 #define VIB_MIN_LEVEL_mV	1200
 
+#define VIB_MIN_ON_MS		40
+
 struct pm8xxx_vib {
 	struct hrtimer vib_timer;
 	struct timed_output_dev timed_dev;
@@ -147,7 +149,9 @@ static int pm8xxx_vib_set(struct pm8xxx_vib *vib, int on)
 #ifdef PAN_HS_VIB_ALL_VOLUME_CTL 
 		val= 0;
 #else
-		val = vib->reg_vib_drv;
+		/* ef44: drive the motor in manual mode like Pantech stock does; the
+		 * reset value keeps the low enable-mode bits (0x3) set */
+		val = vib->reg_vib_drv & ~0x3;
 #endif
 		val |= ((vib->level << VIB_DRV_SEL_SHIFT) & VIB_DRV_SEL_MASK);
 #ifdef CONFIG_PANTECH_VIBRATOR
@@ -230,6 +234,11 @@ retry:
 	else {
 		value = (value > vib->pdata->max_timeout_ms ?
 				 vib->pdata->max_timeout_ms : value);
+		/* ef44: the ERM motor needs time to spin up, and with the
+		 * on/off both deferred to the workqueue a 10-30 ms haptic
+		 * pulse can be switched off before it was ever switched on */
+		if (value < VIB_MIN_ON_MS)
+			value = VIB_MIN_ON_MS;
 		vib->state = 1;
 		hrtimer_start(&vib->vib_timer,
 			      ktime_set(value / 1000, (value % 1000) * 1000000),

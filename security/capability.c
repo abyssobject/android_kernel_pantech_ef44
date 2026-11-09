@@ -12,6 +12,26 @@
 
 #include <linux/security.h>
 
+static int cap_binder_set_context_mgr(const struct cred *mgr)
+{
+	return 0;
+}
+
+static int cap_binder_transaction(const struct cred *from, const struct cred *to)
+{
+	return 0;
+}
+
+static int cap_binder_transfer_binder(const struct cred *from, const struct cred *to)
+{
+	return 0;
+}
+
+static int cap_binder_transfer_file(const struct cred *from, const struct cred *to, struct file *file)
+{
+	return 0;
+}
+
 static int cap_syslog(int type)
 {
 	return 0;
@@ -74,8 +94,8 @@ static int cap_sb_statfs(struct dentry *dentry)
 	return 0;
 }
 
-static int cap_sb_mount(char *dev_name, struct path *path, char *type,
-			unsigned long flags, void *data)
+static int cap_sb_mount(const char *dev_name, struct path *path,
+			const char *type, unsigned long flags, void *data)
 {
 	return 0;
 }
@@ -378,6 +398,11 @@ static int cap_cred_prepare(struct cred *new, const struct cred *old, gfp_t gfp)
 
 static void cap_cred_transfer(struct cred *new, const struct cred *old)
 {
+}
+
+static void cap_cred_getsecid(const struct cred *c, u32 *secid)
+{
+	*secid = 0;
 }
 
 static int cap_kernel_act_as(struct cred *new, u32 secid)
@@ -877,6 +902,10 @@ static void cap_audit_rule_free(void *lsmrule)
 
 void __init security_fixup_ops(struct security_operations *ops)
 {
+	set_to_cap_if_null(ops, binder_set_context_mgr);
+	set_to_cap_if_null(ops, binder_transaction);
+	set_to_cap_if_null(ops, binder_transfer_binder);
+	set_to_cap_if_null(ops, binder_transfer_file);
 	set_to_cap_if_null(ops, ptrace_access_check);
 	set_to_cap_if_null(ops, ptrace_traceme);
 	set_to_cap_if_null(ops, capget);
@@ -963,6 +992,7 @@ void __init security_fixup_ops(struct security_operations *ops)
 	set_to_cap_if_null(ops, cred_free);
 	set_to_cap_if_null(ops, cred_prepare);
 	set_to_cap_if_null(ops, cred_transfer);
+	set_to_cap_if_null(ops, cred_getsecid);
 	set_to_cap_if_null(ops, kernel_act_as);
 	set_to_cap_if_null(ops, kernel_create_files_as);
 	set_to_cap_if_null(ops, kernel_module_request);

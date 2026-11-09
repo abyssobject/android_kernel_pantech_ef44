@@ -248,6 +248,7 @@
 #include <linux/percpu.h>
 #include <linux/cryptohash.h>
 #include <linux/fips.h>
+#include <linux/syscalls.h>
 
 #ifdef CONFIG_GENERIC_HARDIRQS
 # include <linux/irq.h>
@@ -1085,6 +1086,24 @@ static ssize_t
 urandom_read(struct file *file, char __user *buf, size_t nbytes, loff_t *ppos)
 {
 	return extract_entropy_user(&nonblocking_pool, buf, nbytes);
+}
+
+/*
+ * getrandom(2) for Android 12 userspace (BoringSSL aborts without it).
+ * Simplified backport of upstream c6e9d6f38894 (Linux 3.17): this kernel's
+ * random driver predates the "pool initialized" tracking, so both flags
+ * read from the nonblocking pool, as /dev/urandom does.
+ */
+SYSCALL_DEFINE3(getrandom, char __user *, buf, size_t, count,
+		unsigned int, flags)
+{
+	if (flags & ~(GRND_NONBLOCK | GRND_RANDOM))
+		return -EINVAL;
+
+	if (count > INT_MAX)
+		count = INT_MAX;
+
+	return extract_entropy_user(&nonblocking_pool, buf, count);
 }
 
 static unsigned int

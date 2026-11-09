@@ -65,7 +65,8 @@
 //-----------------------------------------------------------------//
 
 #ifdef CONFIG_PANTECH_SND // kdkim for MBHC with GPIO(MSM GPIO)
-#if defined(T_OSCAR)
+/* EF44S, like OSCAR, detects the jack on MSM GPIO 35 (stock EF44S source) */
+#if defined(T_OSCAR) || defined(CONFIG_MACH_MSM8960_EF44S)
 #define JACK_DETECT_GPIO 35
 #define JACK_DETECT_INT MSM_GPIO_TO_INT(JACK_DETECT_GPIO)
 //#endif /* T_OSCAR */

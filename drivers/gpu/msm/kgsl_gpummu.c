@@ -249,9 +249,15 @@ done:
 	return addr;
 }
 
-static inline void _kgsl_ptpool_rm_chunk(struct kgsl_ptpool_chunk *chunk)
+static inline void _kgsl_ptpool_rm_chunk(struct kgsl_ptpool *pool,
+					 struct kgsl_ptpool_chunk *chunk)
 {
 	list_del(&chunk->list);
+	/* keep ptpool_entries/ptpool_chunks at what the pool holds now */
+	pool->chunks--;
+	pool->entries -= chunk->count;
+	if (!chunk->dynamic)
+		pool->static_entries -= chunk->count;
 
 	if (chunk->data)
 		dma_free_coherent(NULL, chunk->size, chunk->data,
@@ -287,7 +293,7 @@ static void kgsl_ptpool_free(struct kgsl_ptpool *pool, void *addr)
 
 			if (chunk->dynamic &&
 				bitmap_empty(chunk->bitmap, chunk->count))
-				_kgsl_ptpool_rm_chunk(chunk);
+				_kgsl_ptpool_rm_chunk(pool, chunk);
 
 			break;
 		}
@@ -306,7 +312,7 @@ void kgsl_gpummu_ptpool_destroy(void *ptpool)
 
 	mutex_lock(&pool->lock);
 	list_for_each_entry_safe(chunk, tmp, &pool->list, list)
-		_kgsl_ptpool_rm_chunk(chunk);
+		_kgsl_ptpool_rm_chunk(pool, chunk);
 	mutex_unlock(&pool->lock);
 
 	kfree(pool);
@@ -355,8 +361,9 @@ err_ptpool_remove:
 	return NULL;
 }
 
-int kgsl_gpummu_pt_equal(struct kgsl_pagetable *pt,
-					unsigned int pt_base)
+int kgsl_gpummu_pt_equal(struct kgsl_mmu *mmu,
+			struct kgsl_pagetable *pt,
+			unsigned int pt_base)
 {
 	struct kgsl_gpummu_pt *gpummu_pt = pt ? pt->priv : NULL;
 	return gpummu_pt && pt_base && (gpummu_pt->base.gpuaddr == pt_base);
@@ -374,6 +381,22 @@ void kgsl_gpummu_destroy_pagetable(void *mmu_specific_pt)
 	kfree(gpummu_pt->tlbflushfilter.base);
 
 	kfree(gpummu_pt);
+}
+
+/*
+ * ef44: return a gpummu pagetable to the state kgsl_gpummu_create_pagetable()
+ * leaves it in, so kgsl_mmu can hand it to a new process instead of freeing
+ * it (see kgsl_pt_recycle() in kgsl_mmu.c).
+ */
+void kgsl_gpummu_reset_pagetable(void *mmu_specific_pt)
+{
+	struct kgsl_gpummu_pt *gpummu_pt = mmu_specific_pt;
+
+	memset(gpummu_pt->base.hostptr, 0, gpummu_pt->base.size);
+	/* make the zeroed PTEs visible to the GPU before the next use */
+	wmb();
+	gpummu_pt->last_superpte = 0;
+	GSL_TLBFLUSH_FILTER_RESET();
 }
 
 static inline uint32_t
@@ -409,10 +432,10 @@ static void kgsl_gpummu_pagefault(struct kgsl_mmu *mmu)
 	KGSL_MEM_CRIT(mmu->device,
 			"mmu page fault: page=0x%lx pt=%d op=%s axi=%d\n",
 			reg & ~(PAGE_SIZE - 1),
-			kgsl_mmu_get_ptname_from_ptbase(ptbase),
+			kgsl_mmu_get_ptname_from_ptbase(mmu, ptbase),
 			reg & 0x02 ? "WRITE" : "READ", (reg >> 4) & 0xF);
 	trace_kgsl_mmu_pagefault(mmu->device, reg & ~(PAGE_SIZE - 1),
-			kgsl_mmu_get_ptname_from_ptbase(ptbase),
+			kgsl_mmu_get_ptname_from_ptbase(mmu, ptbase),
 			reg & 0x02 ? "WRITE" : "READ");
 }
 
@@ -597,7 +620,7 @@ kgsl_gpummu_unmap(void *mmu_specific_pt,
 {
 	unsigned int numpages;
 	unsigned int pte, ptefirst, ptelast, superpte;
-	unsigned int range = kgsl_sg_size(memdesc->sg, memdesc->sglen);
+	unsigned int range = memdesc->size;
 	struct kgsl_gpummu_pt *gpummu_pt = mmu_specific_pt;
 
 	/* All GPU addresses as assigned are page aligned, but some
@@ -714,10 +737,16 @@ kgsl_gpummu_get_current_ptbase(struct kgsl_mmu *mmu)
 }
 
 static unsigned int
-kgsl_gpummu_pt_get_base_addr(struct kgsl_pagetable *pt)
+kgsl_gpummu_get_pt_base_addr(struct kgsl_mmu *mmu,
+			struct kgsl_pagetable *pt)
 {
 	struct kgsl_gpummu_pt *gpummu_pt = pt->priv;
 	return gpummu_pt->base.gpuaddr;
+}
+
+static int kgsl_gpummu_get_num_iommu_units(struct kgsl_mmu *mmu)
+{
+	return 1;
 }
 
 struct kgsl_mmu_ops gpummu_ops = {
@@ -729,10 +758,13 @@ struct kgsl_mmu_ops gpummu_ops = {
 	.mmu_device_setstate = kgsl_gpummu_default_setstate,
 	.mmu_pagefault = kgsl_gpummu_pagefault,
 	.mmu_get_current_ptbase = kgsl_gpummu_get_current_ptbase,
+	.mmu_pt_equal = kgsl_gpummu_pt_equal,
+	.mmu_get_pt_base_addr = kgsl_gpummu_get_pt_base_addr,
 	.mmu_enable_clk = NULL,
 	.mmu_disable_clk_on_ts = NULL,
 	.mmu_get_pt_lsb = NULL,
-	.mmu_get_reg_map_desc = NULL,
+	.mmu_get_reg_gpuaddr = NULL,
+	.mmu_get_num_iommu_units = kgsl_gpummu_get_num_iommu_units,
 };
 
 struct kgsl_mmu_pt_ops gpummu_pt_ops = {
@@ -740,6 +772,4 @@ struct kgsl_mmu_pt_ops gpummu_pt_ops = {
 	.mmu_unmap = kgsl_gpummu_unmap,
 	.mmu_create_pagetable = kgsl_gpummu_create_pagetable,
 	.mmu_destroy_pagetable = kgsl_gpummu_destroy_pagetable,
-	.mmu_pt_equal = kgsl_gpummu_pt_equal,
-	.mmu_pt_get_base_addr = kgsl_gpummu_pt_get_base_addr,
 };

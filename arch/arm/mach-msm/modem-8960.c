@@ -33,6 +33,9 @@
 #include "modem_notifier.h"
 #include "ramdump.h"
 
+/* ef44: use the stock subsystem-restart path for modem crashes */
+#undef FEATURE_PANTECH_WLAN_QCOM_PATCH
+
 #ifdef FEATURE_PANTECH_WLAN_QCOM_PATCH //lee.eunsuk 20120423, SSR
 #define MODULE_NAME			"modem_8960"
 #endif
@@ -87,12 +90,10 @@ static void modem_wdog_check(struct work_struct *work)
 	regval = readl_relaxed(q6_sw_wdog_addr);
 	if (!regval) {
 		pr_err("modem-8960: Modem watchdog wasn't activated!. Restarting the modem now.\n");
-#ifdef FEATURE_PANTECH_WLAN_QCOM_PATCH //lee.eunsuk 20120423, SSR
-		log_modem_sfr();
-		panic(MODULE_NAME "Modem crashed.");
-#else
-		restart_modem();
-#endif		
+		/* ef44: let subsystem_restart's restart_level decide instead of
+		 * Pantech's unconditional panic, so a modem crash doesn't take
+		 * the whole system down while Android is still coming up */
+		restart_modem();		
 	}
 
 	iounmap(q6_sw_wdog_addr);

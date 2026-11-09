@@ -31,9 +31,7 @@
 #ifndef MIPI_ROHM_H
 #define MIPI_ROHM_H
 
-//#if (BOARD_VER >= WS10)
 #define FEATURE_ROHM_CABC_ON
-//#endif
 
 #define MIPI_CLOCK_440MBPS
 //#define MIPI_CLOCK_500MBPS
@@ -44,6 +42,12 @@
    Code : PowerMangerService.java(US, Park hou jae), mipi_renesas.c, board-8064_display.c
 */
 #define FEATURE_RENESAS_BL_CTRL_CHG
+
+/*
+ * 2012.08.02, kkcho
+ * Sharp workaround code for display shake 
+ */
+#define FEATURE_ROHM_BLACK_DATA_CMD  
 
 int mipi_rohm_device_register(struct msm_panel_info *pinfo,
 					u32 channel, u32 panel);

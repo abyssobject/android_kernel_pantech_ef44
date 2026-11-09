@@ -1,5 +1,6 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/export.h>
 #include <linux/err.h>
@@ -31,6 +32,16 @@ char *kstrdup(const char *s, gfp_t gfp)
 	return buf;
 }
 EXPORT_SYMBOL(kstrdup);
+
+/* kvfree, from upstream 39f1f78d53b9 (needed by the zram backport) */
+void kvfree(const void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		vfree(addr);
+	else
+		kfree(addr);
+}
+EXPORT_SYMBOL(kvfree);
 
 /**
  * kstrndup - allocate space for and copy an existing string

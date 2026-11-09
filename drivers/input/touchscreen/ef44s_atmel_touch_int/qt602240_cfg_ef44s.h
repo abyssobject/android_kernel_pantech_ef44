@@ -305,18 +305,19 @@ int init_hw_setting(void)
 	int rc; 
 	unsigned gpioConfig;
 
-#if (BOARD_VER == PT10 )
-	struct regulator *vreg_touch_LVS4; // 1.8V	
+	/* ef44: always power the touch controller from 8921_lvs4 (1.8 V) */
+	struct regulator *vreg_touch_LVS4;
 	vreg_touch_LVS4 = regulator_get(NULL, "8921_lvs4");
-	if(vreg_touch_LVS4 == NULL)
-		printk(KERN_ERR "%s: vreg_touch_LVS4  \n", __func__);
-
-	rc = regulator_enable(vreg_touch_LVS4);
-	if (rc) {
-		printk(KERN_ERR "%s: vreg_LVS4 enable failed (%d)\n", __func__, rc);
-		return 0;
+	if (IS_ERR_OR_NULL(vreg_touch_LVS4)) {
+		printk(KERN_ERR "%s: can't get 8921_lvs4 (%ld)\n", __func__,
+		       PTR_ERR(vreg_touch_LVS4));
+	} else {
+		rc = regulator_enable(vreg_touch_LVS4);
+		if (rc)
+			printk(KERN_ERR "%s: 8921_lvs4 enable failed (%d)\n", __func__, rc);
+		else
+			msleep(10);
 	}
-#endif
 
 	gpio_request(GPIO_TOUCH_POWER, "touch_power_n");
 	gpioConfig = GPIO_CFG(GPIO_TOUCH_POWER, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA);

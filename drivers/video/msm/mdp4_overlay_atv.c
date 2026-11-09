@@ -165,7 +165,7 @@ void mdp4_atv_overlay(struct msm_fb_data_type *mfd)
 	unsigned long flag;
 	struct mdp4_overlay_pipe *pipe;
 
-	if (!mfd->panel_power_on)
+	if (mdp_fb_is_power_off(mfd))
 		return;
 
 	/* no need to power on cmd block since it's lcdc mode */
@@ -184,6 +184,8 @@ void mdp4_atv_overlay(struct msm_fb_data_type *mfd)
 	} else {
 		pipe->srcp0_addr = (uint32)(buf + buf_offset);
 	}
+	mdp_update_pm(mfd, vsync_ctrl_db[0].vsync_time);
+
 	mdp4_overlay_mdp_perf_req(pipe, mfd);
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
 	mdp4_overlay_rgb_setup(pipe);

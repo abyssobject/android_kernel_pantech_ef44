@@ -17,7 +17,12 @@
  * kernel API.
  */
 
+#ifndef UNCACHED
+#define CACHED 1
+#define UNCACHED 0
+#endif
 #include <linux/init.h>
+#include <linux/msm_ion.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -56,7 +61,7 @@ static unsigned long msm_mem_allocate(struct videobuf2_contig_pmem *mem)
 		goto client_failed;
 	}
 	mem->ion_handle = ion_alloc(mem->client, mem->size, SZ_4K,
-		(0x1 << ION_CP_MM_HEAP_ID | 0x1 << ION_IOMMU_HEAP_ID));
+		(0x1 << ION_CP_MM_HEAP_ID | 0x1 << ION_IOMMU_HEAP_ID), 0);
 	if (IS_ERR((void *)mem->ion_handle)) {
 		pr_err("%s Could not allocate\n", __func__);
 		goto alloc_failed;

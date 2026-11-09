@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/msm_ion.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
@@ -1745,7 +1746,9 @@ void __init msm8960_init_fb(void)
 printk("***************111msm8960_init_fb\n");
 	platform_device_register(&msm_fb_device);
 
-#ifdef CONFIG_FB_MSM_WRITEBACK_MSM_PANEL
+/* ef44: no WFD writeback framebuffer, it would take fb0/fb1 ahead of
+ * the built-in panel with the cm-14.1 msm_fb */
+#if defined(CONFIG_FB_MSM_WRITEBACK_MSM_PANEL) && defined(EF44_ENABLE_WFD)
 	platform_device_register(&wfd_panel_device);
 	platform_device_register(&wfd_device);
 #endif

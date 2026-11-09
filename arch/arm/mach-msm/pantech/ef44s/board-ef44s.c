@@ -84,6 +84,7 @@
 
 #include <linux/smsc3503.h>
 #include <linux/ion.h>
+#include <linux/msm_ion.h>
 #include <mach/ion.h>
 #include <mach/mdm2.h>
 #include <mach/mdm-peripheral.h>
@@ -541,72 +542,74 @@ static struct ion_co_heap_pdata fw_co_msm8960_ion_pdata = {
  * to each other.
  * Don't swap the order unless you know what you are doing!
  */
+static struct ion_platform_heap msm8960_heaps[] = {
+	{
+		.id	= ION_SYSTEM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_SYSTEM,
+		.name	= ION_VMALLOC_HEAP_NAME,
+	},
+#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
+	{
+		.id	= ION_CP_MM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MM_HEAP_NAME,
+		.size	= MSM_ION_MM_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &cp_mm_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_MM_FIRMWARE_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_MM_FIRMWARE_HEAP_NAME,
+		.size	= MSM_ION_MM_FW_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &fw_co_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_CP_MFC_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CP,
+		.name	= ION_MFC_HEAP_NAME,
+		.size	= MSM_ION_MFC_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &cp_mfc_msm8960_ion_pdata,
+	},
+#ifndef CONFIG_MSM_IOMMU
+	{
+		.id	= ION_SF_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_SF_HEAP_NAME,
+		.size	= MSM_ION_SF_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+#endif
+	{
+		.id	= ION_IOMMU_HEAP_ID,
+		.type	= ION_HEAP_TYPE_IOMMU,
+		.name	= ION_IOMMU_HEAP_NAME,
+	},
+	{
+		.id	= ION_QSECOM_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_QSECOM_HEAP_NAME,
+		.size	= MSM_ION_QSECOM_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+	{
+		.id	= ION_AUDIO_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_AUDIO_HEAP_NAME,
+		.size	= MSM_ION_AUDIO_SIZE,
+		.memory_type = ION_EBI_TYPE,
+		.extra_data = (void *) &co_msm8960_ion_pdata,
+	},
+#endif
+};
+
 static struct ion_platform_data msm8960_ion_pdata = {
 	.nr = MSM_ION_HEAP_NUM,
-	.heaps = {
-		{
-			.id	= ION_SYSTEM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_SYSTEM,
-			.name	= ION_VMALLOC_HEAP_NAME,
-		},
-#ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		{
-			.id	= ION_CP_MM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MM_HEAP_NAME,
-			.size	= MSM_ION_MM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &cp_mm_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_MM_FIRMWARE_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_MM_FIRMWARE_HEAP_NAME,
-			.size	= MSM_ION_MM_FW_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &fw_co_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_CP_MFC_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MFC_HEAP_NAME,
-			.size	= MSM_ION_MFC_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &cp_mfc_msm8960_ion_pdata,
-		},
-#ifndef CONFIG_MSM_IOMMU
-		{
-			.id	= ION_SF_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_SF_HEAP_NAME,
-			.size	= MSM_ION_SF_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-#endif
-		{
-			.id	= ION_IOMMU_HEAP_ID,
-			.type	= ION_HEAP_TYPE_IOMMU,
-			.name	= ION_IOMMU_HEAP_NAME,
-		},
-		{
-			.id	= ION_QSECOM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_QSECOM_HEAP_NAME,
-			.size	= MSM_ION_QSECOM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-		{
-			.id	= ION_AUDIO_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_AUDIO_HEAP_NAME,
-			.size	= MSM_ION_AUDIO_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_msm8960_ion_pdata,
-		},
-#endif
-	}
+	.heaps = msm8960_heaps,
 };
 
 static struct platform_device msm8960_ion_dev = {
@@ -961,8 +964,13 @@ static int __init ext_display_setup(char *param)
 }
 early_param("ext_display", ext_display_setup);
 
+extern void ef44_ramlog_reserve(void);
+
+extern void __init msm8960_add_vidc_device(void);
+
 static void __init msm8960_reserve(void)
 {
+	ef44_ramlog_reserve();
 	msm8960_set_display_params(prim_panel_name, ext_panel_name);
 	msm_reserve();
 	if (msm8960_fmem_pdata.size) {
@@ -3292,7 +3300,9 @@ static int bluetooth_power(int on)
 		gpio_set_value(GPIO_BT_RESET_N, 0);
 		mdelay(200); 
 		gpio_set_value(GPIO_BT_RESET_N, 1);
-		mdelay(200); 
+		/* ef44: libbt sends HCI_RESET right after power-on and never
+		 * retries; the BCM4334 often is not listening yet after 200 ms */
+		msleep(600);
 
 	} else {
 		for (pin = 0; pin < ARRAY_SIZE(bt_config_power_off); pin++) {
@@ -4060,6 +4070,7 @@ static void __init msm8960_cdp_init(void)
        if ((soc_smem_id_vendor1_ptr->hw_rev == 5) ||(soc_smem_id_vendor1_ptr->hw_rev == 6))
        	platform_device_register(&msm_device_i2c_gpio_max17058);
 #endif
+	msm8960_add_vidc_device();
 	msm8960_pm8921_gpio_mpp_init();
 	platform_add_devices(cdp_devices, ARRAY_SIZE(cdp_devices));
 	msm8960_init_smsc_hub();

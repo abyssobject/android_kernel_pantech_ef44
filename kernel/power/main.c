@@ -16,6 +16,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/hrtimer.h>
+#include <linux/wakelock.h>
 
 #include "power.h"
 
@@ -354,6 +355,29 @@ static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 	return (s - buf);
 }
 
+#if defined(CONFIG_SUSPEND) && defined(CONFIG_EARLYSUSPEND)
+/*
+ * ef44: Android 12's system_suspend counts wakelocks in userspace, writes
+ * "mem" only when none is held, and never writes "on". With earlysuspend
+ * semantics the first "mem" early-suspended the display and nothing ever
+ * late-resumed it: after the screen went off it never came back. Treat
+ * "mem" as the upstream one-shot suspend attempt instead; the display is
+ * already blanked and unblanked by the HWC through FBIOBLANK.
+ */
+static int ef44_suspend_once(suspend_state_t state)
+{
+	int error;
+
+	wake_unlock(&main_wake_lock);
+	if (has_wake_lock(WAKE_LOCK_SUSPEND))
+		error = -EBUSY;
+	else
+		error = pm_suspend(state);
+	wake_lock(&main_wake_lock);
+	return error;
+}
+#endif
+
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			   const char *buf, size_t n)
 {
@@ -382,9 +406,13 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	for (s = &pm_states[state]; state < PM_SUSPEND_MAX; s++, state++) {
 		if (*s && len == strlen(*s) && !strncmp(buf, *s, len)) {
 #ifdef CONFIG_EARLYSUSPEND
-			if (state == PM_SUSPEND_ON || valid_state(state)) {
+			if (state == PM_SUSPEND_ON) {
 				error = 0;
 				request_suspend_state(state);
+				break;
+			}
+			if (valid_state(state)) {
+				error = ef44_suspend_once(state);
 				break;
 			}
 #else
